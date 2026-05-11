@@ -1,0 +1,213 @@
+{
+  "trial_id": -1,
+  "split": "test",
+  "fit_split": "train_plus_val",
+  "metrics": {
+    "average_precision": 0.40275210124964506,
+    "accuracy": 0.9756969263759828,
+    "f1": 0.3013698630136986,
+    "roc_auc": 0.9041191523816783
+  },
+  "primary_metric": "roc_auc",
+  "primary_score": 0.9041191523816783,
+  "n_predictions": 88137,
+  "shap_importance_top30": [
+    {
+      "rank": 1,
+      "feature": "recency2__days_since_any",
+      "mean_abs_shap": 0.01581320463082679
+    },
+    {
+      "rank": 2,
+      "feature": "recency2__days_since_comment",
+      "mean_abs_shap": 0.0066940749115469295
+    },
+    {
+      "rank": 3,
+      "feature": "activity_windows__posts_365d",
+      "mean_abs_shap": 0.006499409628582259
+    },
+    {
+      "rank": 4,
+      "feature": "badges_windows3__badge_class3_all",
+      "mean_abs_shap": 0.0031450729314173092
+    },
+    {
+      "rank": 5,
+      "feature": "activity_windows__posts_all",
+      "mean_abs_shap": 0.0028605129323391355
+    },
+    {
+      "rank": 6,
+      "feature": "comment_vote_windows2__comments_all",
+      "mean_abs_shap": 0.002601673546513977
+    },
+    {
+      "rank": 7,
+      "feature": "user_profile__user_age_days",
+      "mean_abs_shap": 0.0018219336081320512
+    },
+    {
+      "rank": 8,
+      "feature": "badges_windows3__badge_names_all",
+      "mean_abs_shap": 0.0011306659000349818
+    },
+    {
+      "rank": 9,
+      "feature": "badges_windows3__days_since_badge",
+      "mean_abs_shap": 0.0011023913712887353
+    },
+    {
+      "rank": 10,
+      "feature": "posthistory_windows__ph_all",
+      "mean_abs_shap": 0.0010436159300827564
+    },
+    {
+      "rank": 11,
+      "feature": "badges_windows3__badges_all",
+      "mean_abs_shap": 0.000993199168766574
+    },
+    {
+      "rank": 12,
+      "feature": "recency2__days_since_post",
+      "mean_abs_shap": 0.0007817010558989876
+    },
+    {
+      "rank": 13,
+      "feature": "comment_vote_windows2__comments_90d",
+      "mean_abs_shap": 0.0006991781632810739
+    },
+    {
+      "rank": 14,
+      "feature": "activity_windows__answers_all",
+      "mean_abs_shap": 0.00029823489678213816
+    },
+    {
+      "rank": 15,
+      "feature": "badges_windows3__badges_365d",
+      "mean_abs_shap": 0.00028038312146939226
+    },
+    {
+      "rank": 16,
+      "feature": "badges_windows3__badge_names_365d",
+      "mean_abs_shap": 0.0001888680181323977
+    },
+    {
+      "rank": 17,
+      "feature": "activity_windows__questions_all",
+      "mean_abs_shap": 0.0001838223583494295
+    },
+    {
+      "rank": 18,
+      "feature": "comment_vote_windows2__comments_30d",
+      "mean_abs_shap": 0.00017369740731946638
+    },
+    {
+      "rank": 19,
+      "feature": "badges_windows3__badges_90d",
+      "mean_abs_shap": 0.00014493678909600186
+    },
+    {
+      "rank": 20,
+      "feature": "activity_windows__posts_90d",
+      "mean_abs_shap": 0.00014090976570737534
+    },
+    {
+      "rank": 21,
+      "feature": "posthistory_windows__ph_90d",
+      "mean_abs_shap": 0.00013721822575554543
+    },
+    {
+      "rank": 22,
+      "feature": "badges_windows3__badge_class2_all",
+      "mean_abs_shap": 7.83729942179793e-05
+    },
+    {
+      "rank": 23,
+      "feature": "posthistory_windows__ph_type_nunique_90d",
+      "mean_abs_shap": 7.563636861362928e-05
+    },
+    {
+      "rank": 24,
+      "feature": "posthistory_windows__ph_30d",
+      "mean_abs_shap": 6.570879572846908e-05
+    },
+    {
+      "rank": 25,
+      "feature": "badges_windows3__badge_class3_90d",
+      "mean_abs_shap": 6.230138793446707e-05
+    },
+    {
+      "rank": 26,
+      "feature": "posthistory_windows__ph_editlike_90d",
+      "mean_abs_shap": 5.950531531388106e-05
+    },
+    {
+      "rank": 27,
+      "feature": "badges_windows3__badge_vel_90_over_365",
+      "mean_abs_shap": 5.2378807409315756e-05
+    },
+    {
+      "rank": 28,
+      "feature": "activity_windows__posts_30d",
+      "mean_abs_shap": 4.362654605728305e-05
+    },
+    {
+      "rank": 29,
+      "feature": "comment_vote_windows2__votes_all",
+      "mean_abs_shap": 4.235049028986282e-05
+    },
+    {
+      "rank": 30,
+      "feature": "recency2__days_since_vote",
+      "mean_abs_shap": 3.717276236844612e-05
+    }
+  ],
+  "shap_note": "SHAP computed on a tree-based surrogate model over engineered features. Top features are ranked by mean absolute SHAP value.",
+  "error": null,
+  "program": {
+    "feature_queries": [
+      {
+        "name": "user_profile",
+        "sql": "SELECT\n  e.OwnerUserId,\n  e.timestamp,\n  (u.Id IS NOT NULL) AS user_exists,\n  (EXTRACT(EPOCH FROM e.timestamp) - EXTRACT(EPOCH FROM u.CreationDate))/86400.0 AS user_age_days\nFROM eval_table e\nLEFT JOIN users u ON u.Id = e.OwnerUserId"
+      },
+      {
+        "name": "activity_windows",
+        "sql": "WITH e AS (SELECT OwnerUserId, timestamp FROM eval_table)\nSELECT\n  e.OwnerUserId,\n  e.timestamp,\n  SUM(CASE WHEN p.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS posts_all,\n  SUM(CASE WHEN p.CreationDate >= e.timestamp-INTERVAL '7 days'  AND p.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS posts_7d,\n  SUM(CASE WHEN p.CreationDate >= e.timestamp-INTERVAL '30 days' AND p.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS posts_30d,\n  SUM(CASE WHEN p.CreationDate >= e.timestamp-INTERVAL '90 days' AND p.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS posts_90d,\n  SUM(CASE WHEN p.CreationDate >= e.timestamp-INTERVAL '365 days' AND p.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS posts_365d,\n  SUM(CASE WHEN p.CreationDate < e.timestamp AND p.PostTypeId=1 THEN 1 ELSE 0 END) AS questions_all,\n  SUM(CASE WHEN p.CreationDate < e.timestamp AND p.PostTypeId=2 THEN 1 ELSE 0 END) AS answers_all\nFROM e\nLEFT JOIN posts p\n  ON p.OwnerUserId = e.OwnerUserId\n AND p.CreationDate < e.timestamp\nGROUP BY e.OwnerUserId, e.timestamp"
+      },
+      {
+        "name": "comment_vote_windows2",
+        "sql": "WITH e AS (SELECT OwnerUserId, timestamp FROM eval_table)\nSELECT\n  e.OwnerUserId,\n  e.timestamp,\n  SUM(CASE WHEN c.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS comments_all,\n  SUM(CASE WHEN c.CreationDate >= e.timestamp-INTERVAL '7 days' AND c.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS comments_7d,\n  SUM(CASE WHEN c.CreationDate >= e.timestamp-INTERVAL '30 days' AND c.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS comments_30d,\n  SUM(CASE WHEN c.CreationDate >= e.timestamp-INTERVAL '90 days' AND c.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS comments_90d,\n  SUM(CASE WHEN v.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS votes_all,\n  SUM(CASE WHEN v.CreationDate >= e.timestamp-INTERVAL '7 days' AND v.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS votes_7d,\n  SUM(CASE WHEN v.CreationDate >= e.timestamp-INTERVAL '30 days' AND v.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS votes_30d,\n  SUM(CASE WHEN v.CreationDate >= e.timestamp-INTERVAL '90 days' AND v.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS votes_90d,\n  COUNT(DISTINCT CASE WHEN v.CreationDate >= e.timestamp-INTERVAL '90 days' AND v.CreationDate < e.timestamp THEN v.PostId END) AS voted_posts_90d,\n  COUNT(DISTINCT CASE WHEN v.CreationDate >= e.timestamp-INTERVAL '30 days' AND v.CreationDate < e.timestamp THEN v.PostId END) AS voted_posts_30d\nFROM e\nLEFT JOIN comments c\n  ON c.UserId = e.OwnerUserId AND c.CreationDate < e.timestamp\nLEFT JOIN votes v\n  ON v.UserId = e.OwnerUserId AND v.CreationDate < e.timestamp\nGROUP BY e.OwnerUserId, e.timestamp"
+      },
+      {
+        "name": "vote_velocity",
+        "sql": "SELECT\n  e.OwnerUserId,\n  e.timestamp,\n  -- ratios based on vote counts\n  (SELECT COUNT(*) FROM votes v WHERE v.UserId=e.OwnerUserId AND v.CreationDate >= e.timestamp-INTERVAL '30 days' AND v.CreationDate < e.timestamp)::DOUBLE\n    / ((SELECT COUNT(*) FROM votes v WHERE v.UserId=e.OwnerUserId AND v.CreationDate >= e.timestamp-INTERVAL '90 days' AND v.CreationDate < e.timestamp) + 1)\n    AS vote_vel_30_over_90,\n  (SELECT COUNT(*) FROM votes v WHERE v.UserId=e.OwnerUserId AND v.CreationDate >= e.timestamp-INTERVAL '90 days' AND v.CreationDate < e.timestamp)::DOUBLE\n    / ((SELECT COUNT(*) FROM votes v WHERE v.UserId=e.OwnerUserId AND v.CreationDate >= e.timestamp-INTERVAL '365 days' AND v.CreationDate < e.timestamp) + 1)\n    AS vote_vel_90_over_365\nFROM eval_table e"
+      },
+      {
+        "name": "badges_windows3",
+        "sql": "WITH e AS (SELECT OwnerUserId, timestamp FROM eval_table)\nSELECT\n  e.OwnerUserId,\n  e.timestamp,\n  COUNT(b.Id) AS badges_all,\n  SUM(CASE WHEN b.Date >= e.timestamp-INTERVAL '365 days' THEN 1 ELSE 0 END) AS badges_365d,\n  SUM(CASE WHEN b.Date >= e.timestamp-INTERVAL '90 days' THEN 1 ELSE 0 END) AS badges_90d,\n  SUM(CASE WHEN b.Date >= e.timestamp-INTERVAL '30 days' THEN 1 ELSE 0 END) AS badges_30d,\n  COUNT(DISTINCT CASE WHEN b.Date < e.timestamp THEN b.Name END) AS badge_names_all,\n  COUNT(DISTINCT CASE WHEN b.Date >= e.timestamp-INTERVAL '365 days' AND b.Date < e.timestamp THEN b.Name END) AS badge_names_365d,\n  SUM(CASE WHEN b.Date < e.timestamp AND b.Class=1 THEN 1 ELSE 0 END) AS badge_class1_all,\n  SUM(CASE WHEN b.Date < e.timestamp AND b.Class=2 THEN 1 ELSE 0 END) AS badge_class2_all,\n  SUM(CASE WHEN b.Date < e.timestamp AND b.Class=3 THEN 1 ELSE 0 END) AS badge_class3_all,\n  SUM(CASE WHEN b.Date >= e.timestamp-INTERVAL '90 days' AND b.Date < e.timestamp AND b.Class=1 THEN 1 ELSE 0 END) AS badge_class1_90d,\n  SUM(CASE WHEN b.Date >= e.timestamp-INTERVAL '90 days' AND b.Date < e.timestamp AND b.Class=2 THEN 1 ELSE 0 END) AS badge_class2_90d,\n  SUM(CASE WHEN b.Date >= e.timestamp-INTERVAL '90 days' AND b.Date < e.timestamp AND b.Class=3 THEN 1 ELSE 0 END) AS badge_class3_90d,\n  COALESCE((EXTRACT(EPOCH FROM e.timestamp) - EXTRACT(EPOCH FROM MAX(b.Date)))/86400.0, 99999) AS days_since_badge,\n  badges_90d::DOUBLE/(badges_365d+1) AS badge_vel_90_over_365,\n  badges_30d::DOUBLE/(badges_90d+1) AS badge_vel_30_over_90\nFROM e\nLEFT JOIN badges b\n  ON b.UserId=e.OwnerUserId\n AND b.Date < e.timestamp\nGROUP BY e.OwnerUserId, e.timestamp"
+      },
+      {
+        "name": "posthistory_windows",
+        "sql": "WITH e AS (SELECT OwnerUserId, timestamp FROM eval_table)\nSELECT\n  e.OwnerUserId,\n  e.timestamp,\n  COUNT(ph.Id) AS ph_all,\n  SUM(CASE WHEN ph.CreationDate >= e.timestamp-INTERVAL '90 days' THEN 1 ELSE 0 END) AS ph_90d,\n  SUM(CASE WHEN ph.CreationDate >= e.timestamp-INTERVAL '30 days' THEN 1 ELSE 0 END) AS ph_30d,\n  COUNT(DISTINCT CASE WHEN ph.CreationDate >= e.timestamp-INTERVAL '90 days' THEN ph.PostHistoryTypeId END) AS ph_type_nunique_90d,\n  SUM(CASE WHEN ph.CreationDate >= e.timestamp-INTERVAL '90 days' AND ph.PostHistoryTypeId IN (4,5,6,10,25,33,34,36) THEN 1 ELSE 0 END) AS ph_editlike_90d\nFROM e\nLEFT JOIN postHistory ph\n  ON ph.UserId=e.OwnerUserId\n AND ph.CreationDate < e.timestamp\nGROUP BY e.OwnerUserId, e.timestamp"
+      },
+      {
+        "name": "recency2",
+        "sql": "WITH e AS (SELECT OwnerUserId, timestamp FROM eval_table),\nlast_post AS (\n  SELECT e.OwnerUserId, e.timestamp, MAX(p.CreationDate) AS last_post_ts\n  FROM e LEFT JOIN posts p ON p.OwnerUserId=e.OwnerUserId AND p.CreationDate < e.timestamp\n  GROUP BY e.OwnerUserId, e.timestamp\n),\nlast_comment AS (\n  SELECT e.OwnerUserId, e.timestamp, MAX(c.CreationDate) AS last_comment_ts\n  FROM e LEFT JOIN comments c ON c.UserId=e.OwnerUserId AND c.CreationDate < e.timestamp\n  GROUP BY e.OwnerUserId, e.timestamp\n),\nlast_vote AS (\n  SELECT e.OwnerUserId, e.timestamp, MAX(v.CreationDate) AS last_vote_ts\n  FROM e LEFT JOIN votes v ON v.UserId=e.OwnerUserId AND v.CreationDate < e.timestamp\n  GROUP BY e.OwnerUserId, e.timestamp\n)\nSELECT\n  e.OwnerUserId,\n  e.timestamp,\n  COALESCE((EXTRACT(EPOCH FROM e.timestamp) - EXTRACT(EPOCH FROM lp.last_post_ts))/86400.0, 99999) AS days_since_post,\n  COALESCE((EXTRACT(EPOCH FROM e.timestamp) - EXTRACT(EPOCH FROM lc.last_comment_ts))/86400.0, 99999) AS days_since_comment,\n  COALESCE((EXTRACT(EPOCH FROM e.timestamp) - EXTRACT(EPOCH FROM lv.last_vote_ts))/86400.0, 99999) AS days_since_vote,\n  LEAST(COALESCE((EXTRACT(EPOCH FROM e.timestamp) - EXTRACT(EPOCH FROM lp.last_post_ts))/86400.0, 99999),\n        COALESCE((EXTRACT(EPOCH FROM e.timestamp) - EXTRACT(EPOCH FROM lc.last_comment_ts))/86400.0, 99999),\n        COALESCE((EXTRACT(EPOCH FROM e.timestamp) - EXTRACT(EPOCH FROM lv.last_vote_ts))/86400.0, 99999)) AS days_since_any\nFROM e\nLEFT JOIN last_post lp USING (OwnerUserId, timestamp)\nLEFT JOIN last_comment lc USING (OwnerUserId, timestamp)\nLEFT JOIN last_vote lv USING (OwnerUserId, timestamp)"
+      }
+    ],
+    "combiner_code": "",
+    "model_choice": "xgb_dart",
+    "model_config": {
+      "n_estimators": 500,
+      "learning_rate": 0.05,
+      "max_depth": 6,
+      "min_child_weight": 20,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "reg_lambda": 1.0
+    }
+  },
+  "dataset": "rel-stack",
+  "task": "user-engagement"
+}

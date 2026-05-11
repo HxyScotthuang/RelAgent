@@ -1,0 +1,27 @@
+# Core dependencies for RelAgent
+# Install with: pip install -r requirements.txt
+
+# AI agent framework
+camel-ai>=0.1.0
+litellm>=1.0.0
+
+# Benchmarks
+relbench>=0.1.0
+dbinfer-bench  # 4DBInfer datasets
+
+# Database
+duckdb>=0.9.0
+
+# Data
+pandas>=2.0.0
+numpy>=2.0.0,<3.0.0
+scikit-learn>=1.4.0
+shap>=0.47.0
+
+# Utilities
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+colorama>=0.4.6
+
+# Optional: local LLM inference
+# vllm>=0.2.0

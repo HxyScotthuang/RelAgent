@@ -1,0 +1,43 @@
+{
+  "feature_queries": [
+    {
+      "name": "user_profile",
+      "sql": "SELECT\n  e.OwnerUserId,\n  e.timestamp,\n  (u.Id IS NOT NULL) AS user_exists,\n  (EXTRACT(EPOCH FROM e.timestamp) - EXTRACT(EPOCH FROM u.CreationDate))/86400.0 AS user_age_days\nFROM eval_table e\nLEFT JOIN users u ON u.Id = e.OwnerUserId"
+    },
+    {
+      "name": "activity_windows",
+      "sql": "WITH e AS (SELECT OwnerUserId, timestamp FROM eval_table)\nSELECT\n  e.OwnerUserId,\n  e.timestamp,\n  SUM(CASE WHEN p.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS posts_all,\n  SUM(CASE WHEN p.CreationDate >= e.timestamp-INTERVAL '7 days'  AND p.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS posts_7d,\n  SUM(CASE WHEN p.CreationDate >= e.timestamp-INTERVAL '30 days' AND p.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS posts_30d,\n  SUM(CASE WHEN p.CreationDate >= e.timestamp-INTERVAL '90 days' AND p.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS posts_90d,\n  SUM(CASE WHEN p.CreationDate >= e.timestamp-INTERVAL '365 days' AND p.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS posts_365d,\n  SUM(CASE WHEN p.CreationDate < e.timestamp AND p.PostTypeId=1 THEN 1 ELSE 0 END) AS questions_all,\n  SUM(CASE WHEN p.CreationDate < e.timestamp AND p.PostTypeId=2 THEN 1 ELSE 0 END) AS answers_all\nFROM e\nLEFT JOIN posts p\n  ON p.OwnerUserId = e.OwnerUserId\n AND p.CreationDate < e.timestamp\nGROUP BY e.OwnerUserId, e.timestamp"
+    },
+    {
+      "name": "comment_vote_windows2",
+      "sql": "WITH e AS (SELECT OwnerUserId, timestamp FROM eval_table)\nSELECT\n  e.OwnerUserId,\n  e.timestamp,\n  SUM(CASE WHEN c.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS comments_all,\n  SUM(CASE WHEN c.CreationDate >= e.timestamp-INTERVAL '7 days' AND c.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS comments_7d,\n  SUM(CASE WHEN c.CreationDate >= e.timestamp-INTERVAL '30 days' AND c.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS comments_30d,\n  SUM(CASE WHEN c.CreationDate >= e.timestamp-INTERVAL '90 days' AND c.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS comments_90d,\n  SUM(CASE WHEN v.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS votes_all,\n  SUM(CASE WHEN v.CreationDate >= e.timestamp-INTERVAL '7 days' AND v.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS votes_7d,\n  SUM(CASE WHEN v.CreationDate >= e.timestamp-INTERVAL '30 days' AND v.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS votes_30d,\n  SUM(CASE WHEN v.CreationDate >= e.timestamp-INTERVAL '90 days' AND v.CreationDate < e.timestamp THEN 1 ELSE 0 END) AS votes_90d,\n  COUNT(DISTINCT CASE WHEN v.CreationDate >= e.timestamp-INTERVAL '90 days' AND v.CreationDate < e.timestamp THEN v.PostId END) AS voted_posts_90d,\n  COUNT(DISTINCT CASE WHEN v.CreationDate >= e.timestamp-INTERVAL '30 days' AND v.CreationDate < e.timestamp THEN v.PostId END) AS voted_posts_30d\nFROM e\nLEFT JOIN comments c\n  ON c.UserId = e.OwnerUserId AND c.CreationDate < e.timestamp\nLEFT JOIN votes v\n  ON v.UserId = e.OwnerUserId AND v.CreationDate < e.timestamp\nGROUP BY e.OwnerUserId, e.timestamp"
+    },
+    {
+      "name": "vote_velocity",
+      "sql": "SELECT\n  e.OwnerUserId,\n  e.timestamp,\n  -- ratios based on vote counts\n  (SELECT COUNT(*) FROM votes v WHERE v.UserId=e.OwnerUserId AND v.CreationDate >= e.timestamp-INTERVAL '30 days' AND v.CreationDate < e.timestamp)::DOUBLE\n    / ((SELECT COUNT(*) FROM votes v WHERE v.UserId=e.OwnerUserId AND v.CreationDate >= e.timestamp-INTERVAL '90 days' AND v.CreationDate < e.timestamp) + 1)\n    AS vote_vel_30_over_90,\n  (SELECT COUNT(*) FROM votes v WHERE v.UserId=e.OwnerUserId AND v.CreationDate >= e.timestamp-INTERVAL '90 days' AND v.CreationDate < e.timestamp)::DOUBLE\n    / ((SELECT COUNT(*) FROM votes v WHERE v.UserId=e.OwnerUserId AND v.CreationDate >= e.timestamp-INTERVAL '365 days' AND v.CreationDate < e.timestamp) + 1)\n    AS vote_vel_90_over_365\nFROM eval_table e"
+    },
+    {
+      "name": "badges_windows3",
+      "sql": "WITH e AS (SELECT OwnerUserId, timestamp FROM eval_table)\nSELECT\n  e.OwnerUserId,\n  e.timestamp,\n  COUNT(b.Id) AS badges_all,\n  SUM(CASE WHEN b.Date >= e.timestamp-INTERVAL '365 days' THEN 1 ELSE 0 END) AS badges_365d,\n  SUM(CASE WHEN b.Date >= e.timestamp-INTERVAL '90 days' THEN 1 ELSE 0 END) AS badges_90d,\n  SUM(CASE WHEN b.Date >= e.timestamp-INTERVAL '30 days' THEN 1 ELSE 0 END) AS badges_30d,\n  COUNT(DISTINCT CASE WHEN b.Date < e.timestamp THEN b.Name END) AS badge_names_all,\n  COUNT(DISTINCT CASE WHEN b.Date >= e.timestamp-INTERVAL '365 days' AND b.Date < e.timestamp THEN b.Name END) AS badge_names_365d,\n  SUM(CASE WHEN b.Date < e.timestamp AND b.Class=1 THEN 1 ELSE 0 END) AS badge_class1_all,\n  SUM(CASE WHEN b.Date < e.timestamp AND b.Class=2 THEN 1 ELSE 0 END) AS badge_class2_all,\n  SUM(CASE WHEN b.Date < e.timestamp AND b.Class=3 THEN 1 ELSE 0 END) AS badge_class3_all,\n  SUM(CASE WHEN b.Date >= e.timestamp-INTERVAL '90 days' AND b.Date < e.timestamp AND b.Class=1 THEN 1 ELSE 0 END) AS badge_class1_90d,\n  SUM(CASE WHEN b.Date >= e.timestamp-INTERVAL '90 days' AND b.Date < e.timestamp AND b.Class=2 THEN 1 ELSE 0 END) AS badge_class2_90d,\n  SUM(CASE WHEN b.Date >= e.timestamp-INTERVAL '90 days' AND b.Date < e.timestamp AND b.Class=3 THEN 1 ELSE 0 END) AS badge_class3_90d,\n  COALESCE((EXTRACT(EPOCH FROM e.timestamp) - EXTRACT(EPOCH FROM MAX(b.Date)))/86400.0, 99999) AS days_since_badge,\n  badges_90d::DOUBLE/(badges_365d+1) AS badge_vel_90_over_365,\n  badges_30d::DOUBLE/(badges_90d+1) AS badge_vel_30_over_90\nFROM e\nLEFT JOIN badges b\n  ON b.UserId=e.OwnerUserId\n AND b.Date < e.timestamp\nGROUP BY e.OwnerUserId, e.timestamp"
+    },
+    {
+      "name": "posthistory_windows",
+      "sql": "WITH e AS (SELECT OwnerUserId, timestamp FROM eval_table)\nSELECT\n  e.OwnerUserId,\n  e.timestamp,\n  COUNT(ph.Id) AS ph_all,\n  SUM(CASE WHEN ph.CreationDate >= e.timestamp-INTERVAL '90 days' THEN 1 ELSE 0 END) AS ph_90d,\n  SUM(CASE WHEN ph.CreationDate >= e.timestamp-INTERVAL '30 days' THEN 1 ELSE 0 END) AS ph_30d,\n  COUNT(DISTINCT CASE WHEN ph.CreationDate >= e.timestamp-INTERVAL '90 days' THEN ph.PostHistoryTypeId END) AS ph_type_nunique_90d,\n  SUM(CASE WHEN ph.CreationDate >= e.timestamp-INTERVAL '90 days' AND ph.PostHistoryTypeId IN (4,5,6,10,25,33,34,36) THEN 1 ELSE 0 END) AS ph_editlike_90d\nFROM e\nLEFT JOIN postHistory ph\n  ON ph.UserId=e.OwnerUserId\n AND ph.CreationDate < e.timestamp\nGROUP BY e.OwnerUserId, e.timestamp"
+    },
+    {
+      "name": "recency2",
+      "sql": "WITH e AS (SELECT OwnerUserId, timestamp FROM eval_table),\nlast_post AS (\n  SELECT e.OwnerUserId, e.timestamp, MAX(p.CreationDate) AS last_post_ts\n  FROM e LEFT JOIN posts p ON p.OwnerUserId=e.OwnerUserId AND p.CreationDate < e.timestamp\n  GROUP BY e.OwnerUserId, e.timestamp\n),\nlast_comment AS (\n  SELECT e.OwnerUserId, e.timestamp, MAX(c.CreationDate) AS last_comment_ts\n  FROM e LEFT JOIN comments c ON c.UserId=e.OwnerUserId AND c.CreationDate < e.timestamp\n  GROUP BY e.OwnerUserId, e.timestamp\n),\nlast_vote AS (\n  SELECT e.OwnerUserId, e.timestamp, MAX(v.CreationDate) AS last_vote_ts\n  FROM e LEFT JOIN votes v ON v.UserId=e.OwnerUserId AND v.CreationDate < e.timestamp\n  GROUP BY e.OwnerUserId, e.timestamp\n)\nSELECT\n  e.OwnerUserId,\n  e.timestamp,\n  COALESCE((EXTRACT(EPOCH FROM e.timestamp) - EXTRACT(EPOCH FROM lp.last_post_ts))/86400.0, 99999) AS days_since_post,\n  COALESCE((EXTRACT(EPOCH FROM e.timestamp) - EXTRACT(EPOCH FROM lc.last_comment_ts))/86400.0, 99999) AS days_since_comment,\n  COALESCE((EXTRACT(EPOCH FROM e.timestamp) - EXTRACT(EPOCH FROM lv.last_vote_ts))/86400.0, 99999) AS days_since_vote,\n  LEAST(COALESCE((EXTRACT(EPOCH FROM e.timestamp) - EXTRACT(EPOCH FROM lp.last_post_ts))/86400.0, 99999),\n        COALESCE((EXTRACT(EPOCH FROM e.timestamp) - EXTRACT(EPOCH FROM lc.last_comment_ts))/86400.0, 99999),\n        COALESCE((EXTRACT(EPOCH FROM e.timestamp) - EXTRACT(EPOCH FROM lv.last_vote_ts))/86400.0, 99999)) AS days_since_any\nFROM e\nLEFT JOIN last_post lp USING (OwnerUserId, timestamp)\nLEFT JOIN last_comment lc USING (OwnerUserId, timestamp)\nLEFT JOIN last_vote lv USING (OwnerUserId, timestamp)"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "xgb_dart",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.05,
+    "max_depth": 6,
+    "min_child_weight": 20,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_lambda": 1.0
+  }
+}

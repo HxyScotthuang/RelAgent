@@ -1,0 +1,49 @@
+# Claude Code
+CLAUDE.md
+
+# General
+*.env
+src/__pycache__/
+__pycache__/
+*.out
+src/raw/
+modeling-examples
+loong_output
+long.py
+*loong*
+old_experimental_files
+
+# Local files
+**/local_*
+**/local-*
+local_results
+
+# Jupyter Notebook
+.ipynb_checkpoints
+.ipynb
+*.ipynb
+**/*.ipynb
+
+
+# Logs
+logs/
+artifacts/
+
+# Weights & Biases
+wandb/
+
+# Parquet files
+*.parquet
+context_files/
+.claude/
+
+# Secrets
+.netrc
+wandb/
+
+api_key.env
+datasets/
+catboost_info/
+
+# SLURM scripts (contain cluster-specific URLs)
+slurm_*.sh
