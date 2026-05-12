@@ -2,6 +2,7 @@
 
 [![arXiv](https://img.shields.io/badge/arXiv-2605.07840-b31b1b.svg)](https://arxiv.org/abs/2605.07840v1)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![CAMEL-AI](https://img.shields.io/badge/CAMEL--AI-Framework-8A2BE2?logo=python&logoColor=white)](https://github.com/camel-ai/camel)
 [![RelBench](https://img.shields.io/badge/RelBench-0.1%2B-3C2179?logo=python&logoColor=white)](https://github.com/snap-stanford/relbench)
 [![DuckDB](https://img.shields.io/badge/DuckDB-0.9%2B-FFF000?logo=duckdb&logoColor=black)](https://duckdb.org/)
 [![LiteLLM](https://img.shields.io/badge/LiteLLM-1.0%2B-2f2f2f.svg)](https://github.com/BerriAI/litellm)
