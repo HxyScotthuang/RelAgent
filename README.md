@@ -7,7 +7,7 @@
 [![DuckDB](https://img.shields.io/badge/DuckDB-0.9%2B-FFF000?logo=duckdb&logoColor=black)](https://duckdb.org/)
 [![LiteLLM](https://img.shields.io/badge/LiteLLM-1.0%2B-2f2f2f.svg)](https://github.com/BerriAI/litellm)
 
-An LLM-based scientist agent for solving predictive tasks on database via iterative SQL feature engineering. The agent proposes SQL feature queries, selects a tree-based learner from a menu of seven options, and iterates based on validation feedback — all without writing any training code.
+An LLM-based scientist agent for solving predictive tasks on database via iterative SQL feature engineering. The agent proposes SQL feature queries, selects a tree-based learner from a menu of seven options, and iterates based on validation feedback — all without writing any training code. Accepted in NeurIPS 26.
 
 ## Overview
 
@@ -119,14 +119,11 @@ Each run saves artifacts to `artifact_dir/<dataset>_<task>_<timestamp>/`:
 If you use RelAgent in your research, please cite:
 
 ```bibtex
-@misc{huang2026relagentllmagentsdata,
+@inproceedings{huang2026relagentllmagentsdata,
       title={RelAgent: LLM Agents as Data Scientists for Relational Learning}, 
       author={Xingyue Huang and Louis Tichelman and Jinwoo Kim and Krzysztof Olejniczak and İsmail İlkan Ceylan},
       year={2026},
-      eprint={2605.07840},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG},
-      url={https://arxiv.org/abs/2605.07840}, 
+      booktitle={Advances in Neural Information Processing Systems},
 }
 ```
 
