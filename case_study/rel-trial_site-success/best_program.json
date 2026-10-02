@@ -1,0 +1,35 @@
+{
+  "feature_queries": [
+    {
+      "name": "facility_geo",
+      "sql": "SELECT\n  e.facility_id,\n  e.timestamp,\n  f.country,\n  f.state,\n  f.city\nFROM eval_table e\nLEFT JOIN facilities f\n  ON f.facility_id = e.facility_id"
+    },
+    {
+      "name": "facility_study_history",
+      "sql": "WITH base AS (\n  SELECT\n    e.facility_id,\n    e.timestamp,\n    fs.nct_id,\n    fs.date AS fs_date\n  FROM eval_table e\n  LEFT JOIN facilities_studies fs\n    ON fs.facility_id = e.facility_id\n   AND fs.date < e.timestamp\n), joined AS (\n  SELECT\n    b.facility_id,\n    b.timestamp,\n    b.nct_id,\n    b.fs_date,\n    s.enrollment,\n    s.study_type,\n    s.phase,\n    s.number_of_arms,\n    s.number_of_groups\n  FROM base b\n  LEFT JOIN studies s\n    ON s.nct_id = b.nct_id\n)\nSELECT\n  facility_id,\n  timestamp,\n  COUNT(DISTINCT nct_id) AS n_prior_studies,\n  COUNT(*) AS n_facility_study_rows,\n  AVG(DATE_DIFF('day', fs_date, timestamp)) AS avg_days_since_fs,\n  MIN(DATE_DIFF('day', fs_date, timestamp)) AS min_days_since_fs,\n  MAX(DATE_DIFF('day', fs_date, timestamp)) AS max_days_since_fs,\n  SUM(CASE WHEN fs_date >= timestamp - INTERVAL '1 year' THEN 1 ELSE 0 END) AS n_studies_last_1y,\n  SUM(CASE WHEN fs_date >= timestamp - INTERVAL '3 year' THEN 1 ELSE 0 END) AS n_studies_last_3y,\n  AVG(enrollment) AS avg_enrollment,\n  approx_quantile(enrollment, 0.5) AS med_enrollment,\n  SUM(CASE WHEN study_type = 'Interventional' THEN 1 ELSE 0 END) AS n_interventional,\n  SUM(CASE WHEN study_type = 'Observational' THEN 1 ELSE 0 END) AS n_observational,\n  SUM(CASE WHEN phase LIKE 'Phase 1%' THEN 1 ELSE 0 END) AS n_phase1,\n  SUM(CASE WHEN phase LIKE 'Phase 2%' THEN 1 ELSE 0 END) AS n_phase2,\n  SUM(CASE WHEN phase LIKE 'Phase 3%' THEN 1 ELSE 0 END) AS n_phase3,\n  SUM(CASE WHEN phase LIKE 'Phase 4%' THEN 1 ELSE 0 END) AS n_phase4,\n  AVG(number_of_arms) AS avg_number_of_arms,\n  AVG(number_of_groups) AS avg_number_of_groups\nFROM joined\nGROUP BY facility_id, timestamp"
+    },
+    {
+      "name": "facility_outcome_analysis_history",
+      "sql": "WITH base AS (\n  SELECT\n    e.facility_id,\n    e.timestamp,\n    fs.nct_id\n  FROM eval_table e\n  LEFT JOIN facilities_studies fs\n    ON fs.facility_id = e.facility_id\n   AND fs.date < e.timestamp\n), oa AS (\n  SELECT\n    b.facility_id,\n    b.timestamp,\n    oa.p_value,\n    oa.param_value,\n    oa.dispersion_value,\n    oa.date AS oa_date\n  FROM base b\n  LEFT JOIN outcome_analyses oa\n    ON oa.nct_id = b.nct_id\n   AND oa.date < b.timestamp\n)\nSELECT\n  facility_id,\n  timestamp,\n  COUNT(*) AS n_outcome_analyses,\n  SUM(CASE WHEN p_value IS NOT NULL AND p_value < 0.05 THEN 1 ELSE 0 END) AS n_p_lt_005,\n  AVG(p_value) AS avg_p_value,\n  approx_quantile(p_value, 0.5) AS med_p_value,\n  AVG(param_value) AS avg_param_value,\n  AVG(dispersion_value) AS avg_dispersion_value,\n  MIN(DATE_DIFF('day', oa_date, timestamp)) AS min_days_since_oa\nFROM oa\nGROUP BY facility_id, timestamp"
+    },
+    {
+      "name": "facility_sponsor_history",
+      "sql": "WITH base AS (\n  SELECT\n    e.facility_id,\n    e.timestamp,\n    fs.nct_id\n  FROM eval_table e\n  LEFT JOIN facilities_studies fs\n    ON fs.facility_id = e.facility_id\n   AND fs.date < e.timestamp\n), sp AS (\n  SELECT\n    b.facility_id,\n    b.timestamp,\n    ss.sponsor_id,\n    ss.lead_or_collaborator\n  FROM base b\n  LEFT JOIN sponsors_studies ss\n    ON ss.nct_id = b.nct_id\n   AND ss.date < b.timestamp\n)\nSELECT\n  facility_id,\n  timestamp,\n  COUNT(DISTINCT sponsor_id) AS n_unique_sponsors,\n  SUM(CASE WHEN lead_or_collaborator = 'lead' THEN 1 ELSE 0 END) AS n_lead_sponsor_rows,\n  SUM(CASE WHEN lead_or_collaborator = 'collaborator' THEN 1 ELSE 0 END) AS n_collab_sponsor_rows\nFROM sp\nGROUP BY facility_id, timestamp"
+    },
+    {
+      "name": "time_features",
+      "sql": "SELECT\n  facility_id,\n  timestamp,\n  EXTRACT(year FROM timestamp) AS asof_year\nFROM eval_table"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "xgboost",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.05,
+    "max_depth": 6,
+    "min_child_weight": 4,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "objective": "reg:absoluteerror"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "feature_queries": [
+    {
+      "name": "user_profile",
+      "sql": "SELECT e.user, e.timestamp,\n       u.birthyear, (EXTRACT(year FROM e.timestamp) - u.birthyear) AS age,\n       u.timezone, u.gender, u.locale\nFROM eval_table e\nLEFT JOIN users u ON u.user_id = e.user"
+    },
+    {
+      "name": "past_counts_multiwin",
+      "sql": "SELECT e.user, e.timestamp,\n  COUNT(*) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= e.timestamp - INTERVAL '7 days'  AND a.start_time < e.timestamp)  AS yesmaybe_7d,\n  COUNT(*) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= e.timestamp - INTERVAL '14 days' AND a.start_time < e.timestamp)  AS yesmaybe_14d,\n  COUNT(*) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= e.timestamp - INTERVAL '30 days' AND a.start_time < e.timestamp)  AS yesmaybe_30d,\n  COUNT(*) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= e.timestamp - INTERVAL '60 days' AND a.start_time < e.timestamp)  AS yesmaybe_60d,\n  COUNT(*) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= e.timestamp - INTERVAL '90 days' AND a.start_time < e.timestamp)  AS yesmaybe_90d,\n  COUNT(*) FILTER (WHERE a.start_time >= e.timestamp - INTERVAL '90 days' AND a.start_time < e.timestamp) AS any_90d\nFROM eval_table e\nLEFT JOIN event_attendees a\n  ON a.user_id = e.user\nGROUP BY e.user, e.timestamp"
+    },
+    {
+      "name": "rates_and_recency",
+      "sql": "WITH base AS (\n  SELECT e.user, e.timestamp,\n    COUNT(*) FILTER (WHERE a.start_time >= e.timestamp - INTERVAL '90 days' AND a.start_time < e.timestamp) AS any_90d,\n    COUNT(*) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= e.timestamp - INTERVAL '90 days' AND a.start_time < e.timestamp) AS yesmaybe_90d,\n    MIN(date_diff('day', a.start_time, e.timestamp)) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time < e.timestamp) AS dsl_yesmaybe\n  FROM eval_table e\n  LEFT JOIN event_attendees a ON a.user_id=e.user\n  GROUP BY e.user, e.timestamp\n)\nSELECT user, timestamp,\n  CASE WHEN any_90d=0 THEN 0.0 ELSE 1.0*yesmaybe_90d/any_90d END AS rate_yesmaybe_90d_filled,\n  COALESCE(dsl_yesmaybe, 9999) AS days_since_last_yesmaybe_filled,\n  CASE WHEN COALESCE(dsl_yesmaybe, 9999) <= 7 THEN 1 ELSE 0 END AS active_yesmaybe_7d\nFROM base"
+    },
+    {
+      "name": "friend_degree",
+      "sql": "SELECT e.user, e.timestamp, COUNT(DISTINCT uf.friend) AS n_friends\nFROM eval_table e\nLEFT JOIN user_friends uf ON uf.user=e.user\nGROUP BY e.user, e.timestamp"
+    },
+    {
+      "name": "friend_activity_90d",
+      "sql": "WITH fe AS (\n  SELECT e.user, e.timestamp, uf.friend AS friend_id\n  FROM eval_table e\n  LEFT JOIN user_friends uf ON uf.user=e.user\n)\nSELECT fe.user, fe.timestamp,\n  COUNT(*) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= fe.timestamp - INTERVAL '90 days' AND a.start_time < fe.timestamp) AS friends_yesmaybe_90d\nFROM fe\nLEFT JOIN event_attendees a ON a.user_id=fe.friend_id\nGROUP BY fe.user, fe.timestamp"
+    },
+    {
+      "name": "event_interest_signals",
+      "sql": "SELECT e.user, e.timestamp,\n  COUNT(*) FILTER (WHERE i.timestamp >= e.timestamp - INTERVAL '30 days' AND i.timestamp < e.timestamp AND i.interested=1) AS interest_30d\nFROM eval_table e\nLEFT JOIN event_interest i ON i.user=e.user\nGROUP BY e.user, e.timestamp"
+    },
+    {
+      "name": "friend_host_upcoming",
+      "sql": "WITH edges AS (\n  SELECT e.user, e.timestamp, uf.friend AS friend_id\n  FROM eval_table e\n  LEFT JOIN user_friends uf ON uf.user=e.user\n)\nSELECT ed.user, ed.timestamp,\n  COUNT(*) FILTER (WHERE ev.start_time >= ed.timestamp AND ev.start_time < ed.timestamp + INTERVAL '7 days') AS friend_host_events_next7d,\n  COUNT(DISTINCT ev.user_id) FILTER (WHERE ev.start_time >= ed.timestamp AND ev.start_time < ed.timestamp + INTERVAL '7 days') AS distinct_friend_hosts_next7d\nFROM edges ed\nLEFT JOIN events ev\n  ON ev.user_id = ed.friend_id\nGROUP BY ed.user, ed.timestamp"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "dart",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.04,
+    "max_depth": 4,
+    "min_child_samples": 40,
+    "subsample": 0.85,
+    "colsample_bytree": 0.85,
+    "objective": "regression_l1",
+    "log_transform_target": true
+  }
+}

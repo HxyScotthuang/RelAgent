@@ -1,0 +1,45 @@
+{
+  "feature_queries": [
+    {
+      "name": "post_static",
+      "sql": "SELECT\n  e.PostId,\n  e.timestamp,\n  p.OwnerUserId,\n  DATE_DIFF('hour', p.CreationDate, e.timestamp) AS post_age_hours,\n  LENGTH(COALESCE(p.Title,'')) AS title_len,\n  LENGTH(COALESCE(p.Body,'')) AS body_len,\n  (LENGTH(COALESCE(p.Tags,'')) - LENGTH(REPLACE(COALESCE(p.Tags,''), '<', ''))) AS tag_count\nFROM eval_table e\nLEFT JOIN posts p ON p.Id = e.PostId"
+    },
+    {
+      "name": "post_vote_windows",
+      "sql": "SELECT\n  e.PostId,\n  e.timestamp,\n  COUNT(*) AS votes_before,\n  SUM(CASE WHEN v.VoteTypeId=2 THEN 1 ELSE 0 END) AS up_before,\n  SUM(CASE WHEN v.VoteTypeId=3 THEN 1 ELSE 0 END) AS down_before,\n  SUM(CASE WHEN v.CreationDate >= e.timestamp - INTERVAL '1 days' THEN 1 ELSE 0 END) AS votes_1d,\n  SUM(CASE WHEN v.CreationDate >= e.timestamp - INTERVAL '7 days' THEN 1 ELSE 0 END) AS votes_7d,\n  SUM(CASE WHEN v.CreationDate >= e.timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS votes_30d,\n  SUM(CASE WHEN v.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS votes_90d\nFROM eval_table e\nLEFT JOIN votes v\n  ON v.PostId = e.PostId\n AND v.CreationDate < e.timestamp\nGROUP BY 1,2"
+    },
+    {
+      "name": "post_comment_windows",
+      "sql": "SELECT\n  e.PostId,\n  e.timestamp,\n  COUNT(*) AS comments_before,\n  SUM(CASE WHEN c.CreationDate >= e.timestamp - INTERVAL '1 days' THEN 1 ELSE 0 END) AS comments_1d,\n  SUM(CASE WHEN c.CreationDate >= e.timestamp - INTERVAL '7 days' THEN 1 ELSE 0 END) AS comments_7d,\n  SUM(CASE WHEN c.CreationDate >= e.timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS comments_30d,\n  SUM(CASE WHEN c.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS comments_90d\nFROM eval_table e\nLEFT JOIN comments c\n  ON c.PostId = e.PostId\n AND c.CreationDate < e.timestamp\nGROUP BY 1,2"
+    },
+    {
+      "name": "post_recent_vote_rate",
+      "sql": "SELECT\n  e.PostId,\n  e.timestamp,\n  SUM(CASE WHEN v.CreationDate >= e.timestamp - INTERVAL '7 days' THEN 1 ELSE 0 END)\n    / NULLIF(DATE_DIFF('day', GREATEST(MAX(p.CreationDate), e.timestamp - INTERVAL '7 days'), e.timestamp), 0)\n    AS votes_per_day_7d,\n  SUM(CASE WHEN v.CreationDate >= e.timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END)\n    / NULLIF(DATE_DIFF('day', GREATEST(MAX(p.CreationDate), e.timestamp - INTERVAL '30 days'), e.timestamp), 0)\n    AS votes_per_day_30d\nFROM eval_table e\nLEFT JOIN posts p ON p.Id=e.PostId\nLEFT JOIN votes v\n  ON v.PostId=e.PostId AND v.CreationDate < e.timestamp\nGROUP BY 1,2"
+    },
+    {
+      "name": "log_and_sentiment",
+      "sql": "WITH vw AS (\n  SELECT\n    e.PostId,\n    e.timestamp,\n    COUNT(*) AS votes_before,\n    SUM(CASE WHEN v.VoteTypeId=2 THEN 1 ELSE 0 END) AS up_before,\n    SUM(CASE WHEN v.VoteTypeId=3 THEN 1 ELSE 0 END) AS down_before,\n    SUM(CASE WHEN v.CreationDate >= e.timestamp - INTERVAL '1 days' THEN 1 ELSE 0 END) AS v1,\n    SUM(CASE WHEN v.CreationDate >= e.timestamp - INTERVAL '7 days' THEN 1 ELSE 0 END) AS v7,\n    SUM(CASE WHEN v.CreationDate >= e.timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS v30,\n    SUM(CASE WHEN v.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS v90\n  FROM eval_table e\n  LEFT JOIN votes v\n    ON v.PostId=e.PostId AND v.CreationDate < e.timestamp\n  GROUP BY 1,2\n), cw AS (\n  SELECT\n    e.PostId,\n    e.timestamp,\n    COUNT(*) AS c_before,\n    SUM(CASE WHEN c.CreationDate >= e.timestamp - INTERVAL '1 days' THEN 1 ELSE 0 END) AS c1,\n    SUM(CASE WHEN c.CreationDate >= e.timestamp - INTERVAL '7 days' THEN 1 ELSE 0 END) AS c7,\n    SUM(CASE WHEN c.CreationDate >= e.timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS c30\n  FROM eval_table e\n  LEFT JOIN comments c\n    ON c.PostId=e.PostId AND c.CreationDate < e.timestamp\n  GROUP BY 1,2\n)\nSELECT\n  vw.PostId,\n  vw.timestamp,\n  LN(vw.votes_before + 1.0) AS ln_votes_before,\n  LN(vw.v1 + 1.0) AS ln_votes_1d,\n  LN(vw.v7 + 1.0) AS ln_votes_7d,\n  LN(vw.v30 + 1.0) AS ln_votes_30d,\n  LN(vw.v90 + 1.0) AS ln_votes_90d,\n  (vw.up_before - vw.down_before) AS up_minus_down_before,\n  vw.up_before * 1.0 / (vw.votes_before + 1.0) AS up_frac_before,\n  LN(cw.c_before + 1.0) AS ln_comments_before,\n  LN(cw.c1 + 1.0) AS ln_comments_1d,\n  LN(cw.c7 + 1.0) AS ln_comments_7d,\n  LN(cw.c30 + 1.0) AS ln_comments_30d\nFROM vw\nJOIN cw USING(PostId, timestamp)"
+    },
+    {
+      "name": "tag_priors_weighted_recent",
+      "sql": "WITH global AS (\n  SELECT AVG(popularity) AS global_mean_pop FROM train_table\n), post_tags AS (\n  SELECT\n    e.PostId,\n    e.timestamp,\n    LOWER(TRIM(t.tag)) AS tag\n  FROM eval_table e\n  LEFT JOIN posts p ON p.Id=e.PostId\n  LEFT JOIN UNNEST(\n    STR_SPLIT(REPLACE(REPLACE(COALESCE(p.Tags,''), '><', ' '), '<', ''), '>')\n  ) AS t(tag)\n  ON TRUE\n  WHERE t.tag IS NOT NULL AND t.tag <> ''\n), train_posts AS (\n  SELECT\n    tt.timestamp,\n    tt.popularity,\n    tp.Tags\n  FROM train_table tt\n  JOIN posts tp ON tp.Id=tt.PostId\n), train_tag_rows AS (\n  SELECT\n    tr.timestamp,\n    tr.popularity,\n    LOWER(TRIM(t.tag)) AS tag\n  FROM train_posts tr\n  LEFT JOIN UNNEST(\n    STR_SPLIT(REPLACE(REPLACE(COALESCE(tr.Tags,''), '><', ' '), '<', ''), '>')\n  ) AS t(tag)\n  ON TRUE\n  WHERE t.tag IS NOT NULL AND t.tag <> ''\n), priors AS (\n  SELECT\n    pt.PostId,\n    pt.timestamp,\n    pt.tag,\n    SUM(CASE WHEN ttr.timestamp >= pt.timestamp - INTERVAL '180 days' THEN ttr.popularity ELSE 0 END) AS tag_sum_pop_180d,\n    SUM(CASE WHEN ttr.timestamp >= pt.timestamp - INTERVAL '180 days' THEN 1 ELSE 0 END) AS tag_n_180d,\n    SUM(ttr.popularity) AS tag_sum_pop_all,\n    COUNT(*) AS tag_n_all\n  FROM post_tags pt\n  LEFT JOIN train_tag_rows ttr\n    ON ttr.tag = pt.tag\n   AND ttr.timestamp < pt.timestamp\n  GROUP BY 1,2,3\n), scored AS (\n  SELECT\n    p.PostId,\n    p.timestamp,\n    p.tag,\n    p.tag_n_all,\n    p.tag_n_180d,\n    (p.tag_sum_pop_all + 30.0*g.global_mean_pop) / (p.tag_n_all + 30.0) AS smooth_all,\n    (p.tag_sum_pop_180d + 30.0*g.global_mean_pop) / (p.tag_n_180d + 30.0) AS smooth_180d\n  FROM priors p\n  CROSS JOIN global g\n)\nSELECT\n  PostId,\n  timestamp,\n  SUM(smooth_all * tag_n_all) / NULLIF(SUM(tag_n_all),0) AS tags_wavg_smooth_all,\n  SUM(smooth_180d * tag_n_180d) / NULLIF(SUM(tag_n_180d),0) AS tags_wavg_smooth_180d,\n  AVG(smooth_all) AS tags_avg_smooth_all,\n  MAX(smooth_all) AS tags_max_smooth_all,\n  SUM(tag_n_all) AS tags_support_sum_all,\n  SUM(tag_n_180d) AS tags_support_sum_180d\nFROM scored\nGROUP BY 1,2"
+    },
+    {
+      "name": "user_activity_votes",
+      "sql": "SELECT\n  e.PostId,\n  e.timestamp,\n  COUNT(DISTINCT p2.Id) AS user_posts_before,\n  SUM(CASE WHEN p2.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS user_posts_90d,\n  SUM(CASE WHEN v2.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS user_votes_on_own_posts_90d\nFROM eval_table e\nLEFT JOIN posts p ON p.Id=e.PostId\nLEFT JOIN posts p2\n  ON p2.OwnerUserId=p.OwnerUserId AND p2.CreationDate < e.timestamp\nLEFT JOIN votes v2\n  ON v2.PostId=p2.Id AND v2.CreationDate < e.timestamp\nGROUP BY 1,2"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "xgboost",
+  "model_config": {
+    "objective": "reg:absoluteerror",
+    "n_estimators": 500,
+    "learning_rate": 0.04,
+    "max_depth": 8,
+    "min_child_weight": 100,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "reg_lambda": 1.0,
+    "log_transform_target": true
+  }
+}

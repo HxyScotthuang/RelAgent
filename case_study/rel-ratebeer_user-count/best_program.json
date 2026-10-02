@@ -1,0 +1,56 @@
+{
+  "feature_queries": [
+    {
+      "name": "user_static",
+      "sql": "SELECT\n  e.user_id,\n  e.timestamp,\n  u.user_type,\n  u.beer_rating_count,\n  u.avg_beer_rating,\n  u.place_rating_count,\n  u.favorite_count,\n  u.total_activity_count,\n  date_diff('day', u.created_at, e.timestamp) AS account_age_days\nFROM eval_table e\nLEFT JOIN users u ON u.user_id = e.user_id"
+    },
+    {
+      "name": "beer_activity",
+      "sql": "SELECT\n  e.user_id, e.timestamp,\n  date_diff('day', max(br.created_at), e.timestamp) AS days_since_last_beer_rating,\n  sum(CASE WHEN br.created_at >= (e.timestamp - INTERVAL '7 day') THEN 1 ELSE 0 END)  AS beer_ratings_7d,\n  sum(CASE WHEN br.created_at >= (e.timestamp - INTERVAL '30 day') THEN 1 ELSE 0 END) AS beer_ratings_30d,\n  sum(CASE WHEN br.created_at >= (e.timestamp - INTERVAL '90 day') THEN 1 ELSE 0 END) AS beer_ratings_90d,\n  sum(CASE WHEN br.created_at >= (e.timestamp - INTERVAL '180 day') THEN 1 ELSE 0 END) AS beer_ratings_180d,\n  sum(CASE WHEN br.created_at >= (e.timestamp - INTERVAL '365 day') THEN 1 ELSE 0 END) AS beer_ratings_365d,\n  count(br.rating_id) AS beer_ratings_all_time,\n  count(DISTINCT br.beer_id) AS distinct_beers_all_time,\n  avg(br.total_score) AS avg_total_score_all_time,\n  stddev_pop(br.total_score) AS std_total_score_all_time,\n  avg(CASE WHEN br.created_at >= (e.timestamp - INTERVAL '90 day') THEN br.total_score ELSE NULL END) AS avg_total_score_90d\nFROM eval_table e\nLEFT JOIN beer_ratings br\n  ON br.user_id = e.user_id\n AND br.created_at < e.timestamp\nGROUP BY e.user_id, e.timestamp"
+    },
+    {
+      "name": "beer_log_pace",
+      "sql": "WITH base AS (\n  SELECT\n    e.user_id, e.timestamp,\n    date_diff('day', u.created_at, e.timestamp) AS account_age_days,\n    sum(CASE WHEN br.created_at >= (e.timestamp - INTERVAL '30 day') THEN 1 ELSE 0 END) AS beer_ratings_30d,\n    sum(CASE WHEN br.created_at >= (e.timestamp - INTERVAL '90 day') THEN 1 ELSE 0 END) AS beer_ratings_90d,\n    sum(CASE WHEN br.created_at >= (e.timestamp - INTERVAL '365 day') THEN 1 ELSE 0 END) AS beer_ratings_365d\n  FROM eval_table e\n  LEFT JOIN users u ON u.user_id = e.user_id\n  LEFT JOIN beer_ratings br\n    ON br.user_id = e.user_id\n   AND br.created_at < e.timestamp\n  GROUP BY e.user_id, e.timestamp, date_diff('day', u.created_at, e.timestamp)\n)\nSELECT\n  user_id, timestamp,\n  ln(1 + beer_ratings_30d) AS ln_beer_ratings_30d,\n  ln(1 + beer_ratings_90d) AS ln_beer_ratings_90d,\n  ln(1 + beer_ratings_365d) AS ln_beer_ratings_365d,\n  (beer_ratings_365d * 1.0) / GREATEST(account_age_days, 1) AS beer_rate_per_day_since_signup\nFROM base"
+    },
+    {
+      "name": "beer_ratio_features",
+      "sql": "WITH w AS (\n  SELECT\n    e.user_id, e.timestamp,\n    sum(CASE WHEN br.created_at >= (e.timestamp - INTERVAL '30 day') THEN 1 ELSE 0 END) AS c30,\n    sum(CASE WHEN br.created_at >= (e.timestamp - INTERVAL '90 day') THEN 1 ELSE 0 END) AS c90,\n    sum(CASE WHEN br.created_at >= (e.timestamp - INTERVAL '365 day') THEN 1 ELSE 0 END) AS c365\n  FROM eval_table e\n  LEFT JOIN beer_ratings br\n    ON br.user_id = e.user_id\n   AND br.created_at < e.timestamp\n   AND br.created_at >= (e.timestamp - INTERVAL '365 day')\n  GROUP BY e.user_id, e.timestamp\n)\nSELECT\n  user_id, timestamp,\n  (c30 * 1.0) / (c365 + 1.0) AS frac_30_over_365,\n  (c90 * 1.0) / (c365 + 1.0) AS frac_90_over_365,\n  (c30 * 1.0) / (c90 + 1.0) AS frac_30_over_90\nFROM w"
+    },
+    {
+      "name": "availability_activity",
+      "sql": "SELECT\n  e.user_id, e.timestamp,\n  count(a.avail_id) AS availability_all_time,\n  sum(CASE WHEN a.created_at >= (e.timestamp - INTERVAL '90 day') THEN 1 ELSE 0 END) AS availability_90d,\n  avg(CASE WHEN a.is_on_tap THEN 1.0 ELSE 0.0 END) AS frac_on_tap_all_time,\n  avg(CASE WHEN a.is_in_bottle THEN 1.0 ELSE 0.0 END) AS frac_in_bottle_all_time\nFROM eval_table e\nLEFT JOIN availability a\n  ON a.user_id = e.user_id\n AND a.created_at < e.timestamp\nGROUP BY e.user_id, e.timestamp"
+    },
+    {
+      "name": "place_activity",
+      "sql": "SELECT\n  e.user_id, e.timestamp,\n  date_diff('day', max(pr.created_at), e.timestamp) AS days_since_last_place_rating,\n  sum(CASE WHEN pr.created_at >= (e.timestamp - INTERVAL '90 day') THEN 1 ELSE 0 END) AS place_ratings_90d,\n  sum(CASE WHEN pr.created_at >= (e.timestamp - INTERVAL '365 day') THEN 1 ELSE 0 END) AS place_ratings_365d,\n  count(pr.rating_id) AS place_ratings_all_time,\n  avg(pr.overall) AS avg_place_overall_all_time\nFROM eval_table e\nLEFT JOIN place_ratings pr\n  ON pr.user_id = e.user_id\n AND pr.created_at < e.timestamp\nGROUP BY e.user_id, e.timestamp"
+    },
+    {
+      "name": "favorites_activity",
+      "sql": "SELECT\n  e.user_id, e.timestamp,\n  date_diff('day', max(f.created_at), e.timestamp) AS days_since_last_favorite,\n  sum(CASE WHEN f.created_at >= (e.timestamp - INTERVAL '90 day') THEN 1 ELSE 0 END) AS favorites_90d,\n  sum(CASE WHEN f.created_at >= (e.timestamp - INTERVAL '365 day') THEN 1 ELSE 0 END) AS favorites_365d,\n  count(f.favorite_id) AS favorites_all_time\nFROM eval_table e\nLEFT JOIN favorites f\n  ON f.user_id = e.user_id\n AND f.created_at < e.timestamp\nGROUP BY e.user_id, e.timestamp"
+    },
+    {
+      "name": "time_calendar",
+      "sql": "SELECT\n  user_id, timestamp,\n  extract(dow FROM timestamp) AS dow,\n  extract(month FROM timestamp) AS month,\n  extract(year FROM timestamp) AS year\nFROM eval_table"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "xgboost",
+  "model_config": {
+    "objective": "reg:absoluteerror",
+    "n_estimators": 500,
+    "learning_rate": 0.05,
+    "max_depth": 8,
+    "min_child_weight": 30,
+    "subsample": 0.8,
+    "colsample_bytree": 0.9,
+    "reg_lambda": 0.0,
+    "reg_alpha": 0.0,
+    "log_transform_target": true,
+    "categorical_features": [
+      "user_static__user_type",
+      "time_calendar__dow",
+      "time_calendar__month",
+      "time_calendar__year"
+    ]
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "feature_queries": [
+    {
+      "name": "review_lifecycle",
+      "sql": "WITH joined AS (\n  SELECT e.product_id, e.timestamp, r.review_time\n  FROM eval_table e\n  LEFT JOIN review r\n    ON r.product_id = e.product_id\n   AND r.review_time <= e.timestamp\n)\nSELECT\n  product_id,\n  timestamp,\n  MIN(review_time) AS first_review_time,\n  MAX(review_time) AS last_review_time,\n  DATE_DIFF('day', MIN(review_time), timestamp) AS days_since_first_review,\n  DATE_DIFF('day', MAX(review_time), timestamp) AS days_since_last_review,\n  DATE_DIFF('day', MIN(review_time), MAX(review_time)) AS span_days\nFROM joined\nGROUP BY product_id, timestamp"
+    },
+    {
+      "name": "review_counts_multiwin",
+      "sql": "WITH joined AS (\n  SELECT e.product_id, e.timestamp, r.review_time, r.rating, r.verified\n  FROM eval_table e\n  LEFT JOIN review r\n    ON r.product_id = e.product_id\n   AND r.review_time <= e.timestamp\n)\nSELECT\n  product_id,\n  timestamp,\n  COUNT(review_time) AS n_reviews_total,\n  SUM(CASE WHEN review_time > timestamp - INTERVAL '7 days' THEN 1 ELSE 0 END) AS n_reviews_7d,\n  SUM(CASE WHEN review_time > timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS n_reviews_30d,\n  SUM(CASE WHEN review_time > timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS n_reviews_90d,\n  SUM(CASE WHEN review_time > timestamp - INTERVAL '180 days' THEN 1 ELSE 0 END) AS n_reviews_180d,\n  SUM(CASE WHEN review_time > timestamp - INTERVAL '365 days' THEN 1 ELSE 0 END) AS n_reviews_365d,\n  AVG(rating) AS rating_mean_total,\n  STDDEV_SAMP(rating) AS rating_std_total,\n  AVG(CASE WHEN review_time > timestamp - INTERVAL '90 days' THEN rating ELSE NULL END) AS rating_mean_90d,\n  AVG(CASE WHEN review_time > timestamp - INTERVAL '365 days' THEN rating ELSE NULL END) AS rating_mean_365d,\n  AVG(CASE WHEN verified THEN 1.0 ELSE 0.0 END) AS verified_rate_total,\n  AVG(CASE WHEN review_time > timestamp - INTERVAL '90 days' THEN (CASE WHEN verified THEN 1.0 ELSE 0.0 END) ELSE NULL END) AS verified_rate_90d\nFROM joined\nGROUP BY product_id, timestamp"
+    },
+    {
+      "name": "review_ratios",
+      "sql": "WITH joined AS (\n  SELECT e.product_id, e.timestamp, r.review_time\n  FROM eval_table e\n  LEFT JOIN review r\n    ON r.product_id = e.product_id\n   AND r.review_time <= e.timestamp\n), counts AS (\n  SELECT\n    product_id,\n    timestamp,\n    SUM(CASE WHEN review_time > timestamp - INTERVAL '7 days' THEN 1 ELSE 0 END) AS n_reviews_7d,\n    SUM(CASE WHEN review_time > timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS n_reviews_30d,\n    SUM(CASE WHEN review_time > timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS n_reviews_90d,\n    SUM(CASE WHEN review_time > timestamp - INTERVAL '180 days' THEN 1 ELSE 0 END) AS n_reviews_180d,\n    SUM(CASE WHEN review_time > timestamp - INTERVAL '365 days' THEN 1 ELSE 0 END) AS n_reviews_365d\n  FROM joined\n  GROUP BY product_id, timestamp\n)\nSELECT\n  product_id,\n  timestamp,\n  (n_reviews_7d * 1.0) / NULLIF(n_reviews_30d,0) AS frac_7_of_30,\n  (n_reviews_30d * 1.0) / NULLIF(n_reviews_90d,0) AS frac_30_of_90,\n  (n_reviews_90d * 1.0) / NULLIF(n_reviews_180d,0) AS frac_90_of_180,\n  (n_reviews_90d * 1.0) / NULLIF(n_reviews_365d,0) AS frac_90_of_365\nFROM counts"
+    },
+    {
+      "name": "review_accel_features",
+      "sql": "WITH joined AS (\n  SELECT e.product_id, e.timestamp, r.review_time\n  FROM eval_table e\n  LEFT JOIN review r\n    ON r.product_id = e.product_id\n   AND r.review_time <= e.timestamp\n), counts AS (\n  SELECT\n    product_id,\n    timestamp,\n    SUM(CASE WHEN review_time > timestamp - INTERVAL '7 days' THEN 1 ELSE 0 END) AS n7,\n    SUM(CASE WHEN review_time > timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS n30,\n    SUM(CASE WHEN review_time > timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS n90,\n    SUM(CASE WHEN review_time > timestamp - INTERVAL '365 days' THEN 1 ELSE 0 END) AS n365,\n    MAX(review_time) AS last_review_time\n  FROM joined\n  GROUP BY product_id, timestamp\n)\nSELECT\n  product_id,\n  timestamp,\n  (n30 * 1.0) - (n90 * (30.0/90.0)) AS accel_30_vs_90,\n  (n90 * 1.0) - (n365 * (90.0/365.0)) AS accel_90_vs_365,\n  CASE WHEN (n90 - n30) > 0 AND n7 = 0 THEN 1 ELSE 0 END AS had_30_90_but_zero_7,\n  CASE WHEN n30 > 0 AND DATE_DIFF('day', last_review_time, timestamp) > 14 THEN 1 ELSE 0 END AS had_30_but_gap_gt14,\n  CASE WHEN n90 > 0 AND DATE_DIFF('day', last_review_time, timestamp) > 30 THEN 1 ELSE 0 END AS had_90_but_gap_gt30\nFROM counts"
+    },
+    {
+      "name": "rating_polarity_recent",
+      "sql": "WITH joined AS (\n  SELECT e.product_id, e.timestamp, r.review_time, r.rating\n  FROM eval_table e\n  LEFT JOIN review r\n    ON r.product_id = e.product_id\n   AND r.review_time <= e.timestamp\n)\nSELECT\n  product_id,\n  timestamp,\n  SUM(CASE WHEN review_time > timestamp - INTERVAL '90 days' AND rating <= 2 THEN 1 ELSE 0 END) AS n_low_90d,\n  SUM(CASE WHEN review_time > timestamp - INTERVAL '90 days' AND rating >= 4 THEN 1 ELSE 0 END) AS n_high_90d,\n  SUM(CASE WHEN review_time > timestamp - INTERVAL '365 days' AND rating <= 2 THEN 1 ELSE 0 END) AS n_low_365d,\n  SUM(CASE WHEN review_time > timestamp - INTERVAL '365 days' AND rating >= 4 THEN 1 ELSE 0 END) AS n_high_365d\nFROM joined\nGROUP BY product_id, timestamp"
+    },
+    {
+      "name": "customer_diversity",
+      "sql": "WITH joined AS (\n  SELECT e.product_id, e.timestamp, r.customer_id, r.review_time\n  FROM eval_table e\n  LEFT JOIN review r\n    ON r.product_id = e.product_id\n   AND r.review_time <= e.timestamp\n)\nSELECT\n  product_id,\n  timestamp,\n  COUNT(DISTINCT customer_id) AS n_customers_total,\n  COUNT(DISTINCT CASE WHEN review_time > timestamp - INTERVAL '90 days' THEN customer_id ELSE NULL END) AS n_customers_90d\nFROM joined\nGROUP BY product_id, timestamp"
+    },
+    {
+      "name": "review_gap_features",
+      "sql": "WITH joined AS (\n  SELECT e.product_id, e.timestamp, r.review_time\n  FROM eval_table e\n  JOIN review r\n    ON r.product_id = e.product_id\n   AND r.review_time <= e.timestamp\n), ranked AS (\n  SELECT\n    product_id,\n    timestamp,\n    review_time,\n    ROW_NUMBER() OVER (PARTITION BY product_id, timestamp ORDER BY review_time DESC) AS rn\n  FROM joined\n), pivoted AS (\n  SELECT\n    product_id,\n    timestamp,\n    MAX(CASE WHEN rn=1 THEN review_time END) AS t1,\n    MAX(CASE WHEN rn=2 THEN review_time END) AS t2,\n    MAX(CASE WHEN rn=3 THEN review_time END) AS t3,\n    MAX(CASE WHEN rn=4 THEN review_time END) AS t4\n  FROM ranked\n  WHERE rn <= 4\n  GROUP BY product_id, timestamp\n)\nSELECT\n  product_id,\n  timestamp,\n  DATE_DIFF('day', t2, t1) AS gap_1_2_days,\n  DATE_DIFF('day', t3, t2) AS gap_2_3_days,\n  DATE_DIFF('day', t4, t3) AS gap_3_4_days,\n  (DATE_DIFF('day', t2, t1) + DATE_DIFF('day', t3, t2) + DATE_DIFF('day', t4, t3)) / 3.0 AS mean_gap_last4\nFROM pivoted"
+    },
+    {
+      "name": "text_activity_recent",
+      "sql": "WITH joined AS (\n  SELECT\n    e.product_id,\n    e.timestamp,\n    r.review_time,\n    r.review_text,\n    r.summary\n  FROM eval_table e\n  LEFT JOIN review r\n    ON r.product_id = e.product_id\n   AND r.review_time <= e.timestamp\n)\nSELECT\n  product_id,\n  timestamp,\n  AVG(CASE WHEN review_time > timestamp - INTERVAL '90 days' THEN LENGTH(COALESCE(review_text,'')) ELSE NULL END) AS review_text_len_mean_90d,\n  AVG(CASE WHEN review_time > timestamp - INTERVAL '90 days' THEN LENGTH(COALESCE(summary,'')) ELSE NULL END) AS summary_len_mean_90d,\n  AVG(CASE WHEN review_time > timestamp - INTERVAL '365 days' THEN LENGTH(COALESCE(review_text,'')) ELSE NULL END) AS review_text_len_mean_365d,\n  AVG(CASE WHEN review_time > timestamp - INTERVAL '365 days' THEN LENGTH(COALESCE(summary,'')) ELSE NULL END) AS summary_len_mean_365d,\n  AVG(CASE WHEN review_time > timestamp - INTERVAL '90 days' THEN (CASE WHEN review_text IS NULL OR review_text='' THEN 1.0 ELSE 0.0 END) ELSE NULL END) AS frac_empty_review_text_90d,\n  AVG(CASE WHEN review_time > timestamp - INTERVAL '90 days' THEN (CASE WHEN summary IS NULL OR summary='' THEN 1.0 ELSE 0.0 END) ELSE NULL END) AS frac_empty_summary_90d\nFROM joined\nGROUP BY product_id, timestamp"
+    },
+    {
+      "name": "product_static_plus",
+      "sql": "SELECT\n  e.product_id,\n  e.timestamp,\n  p.price AS price,\n  LENGTH(COALESCE(p.brand,'')) AS brand_len,\n  CASE WHEN p.brand IS NULL OR p.brand='' THEN 1 ELSE 0 END AS brand_missing,\n  LENGTH(COALESCE(p.title,'')) AS title_len,\n  LENGTH(COALESCE(p.description,'')) AS desc_len,\n  ARRAY_LENGTH(p.category) AS category_depth\nFROM eval_table e\nLEFT JOIN product p ON p.product_id = e.product_id"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "xgboost",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.04,
+    "max_depth": 8,
+    "min_child_weight": 20,
+    "subsample": 0.9,
+    "colsample_bytree": 0.7,
+    "reg_lambda": 1.0
+  }
+}

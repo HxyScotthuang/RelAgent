@@ -1,0 +1,56 @@
+{
+  "feature_queries": [
+    {
+      "name": "user_profile",
+      "sql": "SELECT e.UserID, e.timestamp, ui.UserAgentID, ui.UserAgentOSID, ui.UserDeviceID, ui.UserAgentFamilyID FROM eval_table e LEFT JOIN UserInfo ui USING(UserID)"
+    },
+    {
+      "name": "visit_aggregates",
+      "sql": "WITH base AS ( SELECT e.UserID, e.timestamp, v.ViewDate, v.AdID FROM eval_table e LEFT JOIN VisitStream v ON v.UserID = e.UserID AND v.ViewDate < e.timestamp AND v.ViewDate >= e.timestamp - INTERVAL '60 days' ) SELECT UserID, timestamp, COUNT(*) AS visits_60d, COUNT(DISTINCT AdID) AS uniq_ads_60d, SUM(CASE WHEN ViewDate >= timestamp - INTERVAL '1 day' THEN 1 ELSE 0 END) AS visits_1d, COUNT(DISTINCT CASE WHEN ViewDate >= timestamp - INTERVAL '1 day' THEN AdID END) AS uniq_ads_1d, SUM(CASE WHEN ViewDate >= timestamp - INTERVAL '4 days' THEN 1 ELSE 0 END) AS visits_4d, COUNT(DISTINCT CASE WHEN ViewDate >= timestamp - INTERVAL '4 days' THEN AdID END) AS uniq_ads_4d, SUM(CASE WHEN ViewDate >= timestamp - INTERVAL '7 days' THEN 1 ELSE 0 END) AS visits_7d, COUNT(DISTINCT CASE WHEN ViewDate >= timestamp - INTERVAL '7 days' THEN AdID END) AS uniq_ads_7d, MIN(date_diff('second', ViewDate, timestamp)) AS sec_since_last_visit, COUNT(DISTINCT CAST(date_trunc('day', ViewDate) AS DATE)) AS active_days_60d FROM base GROUP BY 1,2"
+    },
+    {
+      "name": "visit_repeat_behavior",
+      "sql": "WITH base AS ( SELECT e.UserID, e.timestamp, v.ViewDate, v.AdID FROM eval_table e LEFT JOIN VisitStream v ON v.UserID=e.UserID AND v.ViewDate < e.timestamp AND v.ViewDate >= e.timestamp - INTERVAL '60 days' ), agg AS ( SELECT UserID, timestamp, COUNT(*) AS visits_60d, COUNT(DISTINCT AdID) AS uniq_ads_60d, SUM(CASE WHEN ViewDate >= timestamp - INTERVAL '7 days' THEN 1 ELSE 0 END) AS visits_7d, COUNT(DISTINCT CASE WHEN ViewDate >= timestamp - INTERVAL '7 days' THEN AdID END) AS uniq_ads_7d, SUM(CASE WHEN ViewDate >= timestamp - INTERVAL '4 days' THEN 1 ELSE 0 END) AS visits_4d, COUNT(DISTINCT CASE WHEN ViewDate >= timestamp - INTERVAL '4 days' THEN AdID END) AS uniq_ads_4d FROM base GROUP BY 1,2 ), by_day AS ( SELECT UserID, timestamp, CAST(date_trunc('day', ViewDate) AS DATE) AS d, COUNT(*) AS views_that_day FROM base GROUP BY 1,2,3 ), day_stats AS ( SELECT UserID, timestamp, AVG(CASE WHEN views_that_day>=2 THEN 1 ELSE 0 END) AS frac_days_ge2_views_60d FROM by_day GROUP BY 1,2 ) SELECT e.UserID, e.timestamp, COALESCE(a.visits_60d,0) - COALESCE(a.uniq_ads_60d,0) AS revisit_views_60d, COALESCE(a.visits_7d,0) - COALESCE(a.uniq_ads_7d,0) AS revisit_views_7d, COALESCE(a.visits_4d,0) - COALESCE(a.uniq_ads_4d,0) AS revisit_views_4d, COALESCE(ds.frac_days_ge2_views_60d,0) AS frac_days_ge2_views_60d FROM eval_table e LEFT JOIN agg a ON a.UserID=e.UserID AND a.timestamp=e.timestamp LEFT JOIN day_stats ds ON ds.UserID=e.UserID AND ds.timestamp=e.timestamp"
+    },
+    {
+      "name": "visit_repeat_norm",
+      "sql": "WITH base AS ( SELECT e.UserID, e.timestamp, v.ViewDate, v.AdID FROM eval_table e LEFT JOIN VisitStream v ON v.UserID=e.UserID AND v.ViewDate < e.timestamp AND v.ViewDate >= e.timestamp - INTERVAL '60 days' ), agg AS ( SELECT UserID, timestamp, COUNT(*) AS visits_60d, COUNT(DISTINCT AdID) AS uniq_ads_60d, SUM(CASE WHEN ViewDate >= timestamp - INTERVAL '7 days' THEN 1 ELSE 0 END) AS visits_7d, COUNT(DISTINCT CASE WHEN ViewDate >= timestamp - INTERVAL '7 days' THEN AdID END) AS uniq_ads_7d, SUM(CASE WHEN ViewDate >= timestamp - INTERVAL '4 days' THEN 1 ELSE 0 END) AS visits_4d, COUNT(DISTINCT CASE WHEN ViewDate >= timestamp - INTERVAL '4 days' THEN AdID END) AS uniq_ads_4d FROM base GROUP BY 1,2 ) SELECT e.UserID, e.timestamp, CASE WHEN COALESCE(a.visits_60d,0)>0 THEN (a.visits_60d - a.uniq_ads_60d)::DOUBLE / a.visits_60d ELSE 0 END AS frac_revisits_60d, CASE WHEN COALESCE(a.visits_7d,0)>0 THEN (a.visits_7d - a.uniq_ads_7d)::DOUBLE / a.visits_7d ELSE 0 END AS frac_revisits_7d, CASE WHEN COALESCE(a.visits_4d,0)>0 THEN (a.visits_4d - a.uniq_ads_4d)::DOUBLE / a.visits_4d ELSE 0 END AS frac_revisits_4d FROM eval_table e LEFT JOIN agg a ON a.UserID=e.UserID AND a.timestamp=e.timestamp"
+    },
+    {
+      "name": "active_days_recent",
+      "sql": "WITH base AS ( SELECT e.UserID, e.timestamp, v.ViewDate FROM eval_table e LEFT JOIN VisitStream v ON v.UserID=e.UserID AND v.ViewDate < e.timestamp AND v.ViewDate >= e.timestamp - INTERVAL '7 days' ) SELECT UserID, timestamp, COUNT(DISTINCT CAST(date_trunc('day', ViewDate) AS DATE)) AS active_days_7d, COUNT(DISTINCT CASE WHEN ViewDate >= timestamp - INTERVAL '4 days' THEN CAST(date_trunc('day', ViewDate) AS DATE) END) AS active_days_4d FROM base GROUP BY 1,2"
+    },
+    {
+      "name": "visit_burstiness_60d",
+      "sql": "WITH base AS ( SELECT e.UserID, e.timestamp, v.ViewDate FROM eval_table e LEFT JOIN VisitStream v ON v.UserID=e.UserID AND v.ViewDate < e.timestamp AND v.ViewDate >= e.timestamp - INTERVAL '60 days' ), by_day AS ( SELECT UserID, timestamp, CAST(date_trunc('day', ViewDate) AS DATE) AS day, COUNT(*) AS views_that_day FROM base GROUP BY 1,2,3 ), by_hour AS ( SELECT UserID, timestamp, CAST(date_trunc('hour', ViewDate) AS TIMESTAMP) AS hour_ts, COUNT(*) AS views_that_hour FROM base GROUP BY 1,2,3 ) SELECT e.UserID, e.timestamp, COALESCE(MAX(d.views_that_day),0) AS max_views_in_day_60d, COALESCE(AVG(d.views_that_day),0) AS avg_views_per_active_day_60d, COALESCE(STDDEV_SAMP(d.views_that_day),0) AS std_views_per_day_60d, COALESCE(MAX(h.views_that_hour),0) AS max_views_in_hour_60d, COALESCE(COUNT(DISTINCT h.hour_ts),0) AS active_hours_60d FROM eval_table e LEFT JOIN by_day d ON d.UserID=e.UserID AND d.timestamp=e.timestamp LEFT JOIN by_hour h ON h.UserID=e.UserID AND h.timestamp=e.timestamp GROUP BY 1,2"
+    },
+    {
+      "name": "visit_burstiness_4d",
+      "sql": "WITH base AS ( SELECT e.UserID, e.timestamp, v.ViewDate FROM eval_table e LEFT JOIN VisitStream v ON v.UserID=e.UserID AND v.ViewDate < e.timestamp AND v.ViewDate >= e.timestamp - INTERVAL '4 days' ), by_day AS ( SELECT UserID, timestamp, CAST(date_trunc('day', ViewDate) AS DATE) AS day, COUNT(*) AS views_that_day FROM base GROUP BY 1,2,3 ), by_hour AS ( SELECT UserID, timestamp, CAST(date_trunc('hour', ViewDate) AS TIMESTAMP) AS hour_ts, COUNT(*) AS views_that_hour FROM base GROUP BY 1,2,3 ) SELECT e.UserID, e.timestamp, COALESCE(MAX(d.views_that_day),0) AS max_views_in_day_4d, COALESCE(AVG(d.views_that_day),0) AS avg_views_per_active_day_4d, COALESCE(STDDEV_SAMP(d.views_that_day),0) AS std_views_per_day_4d, COALESCE(MAX(h.views_that_hour),0) AS max_views_in_hour_4d, COALESCE(COUNT(DISTINCT h.hour_ts),0) AS active_hours_4d FROM eval_table e LEFT JOIN by_day d ON d.UserID=e.UserID AND d.timestamp=e.timestamp LEFT JOIN by_hour h ON h.UserID=e.UserID AND h.timestamp=e.timestamp GROUP BY 1,2"
+    },
+    {
+      "name": "visit_peakiness",
+      "sql": "WITH agg AS ( WITH base AS ( SELECT e.UserID, e.timestamp, v.ViewDate FROM eval_table e LEFT JOIN VisitStream v ON v.UserID=e.UserID AND v.ViewDate < e.timestamp AND v.ViewDate >= e.timestamp - INTERVAL '60 days' ) SELECT UserID, timestamp, COUNT(*) AS visits_60d, SUM(CASE WHEN ViewDate >= timestamp - INTERVAL '4 days' THEN 1 ELSE 0 END) AS visits_4d FROM base GROUP BY 1,2 ), maxd AS ( WITH base AS ( SELECT e.UserID, e.timestamp, v.ViewDate FROM eval_table e LEFT JOIN VisitStream v ON v.UserID=e.UserID AND v.ViewDate < e.timestamp AND v.ViewDate >= e.timestamp - INTERVAL '60 days' ), by_day AS ( SELECT UserID, timestamp, CAST(date_trunc('day', ViewDate) AS DATE) AS d, COUNT(*) AS c FROM base GROUP BY 1,2,3 ) SELECT UserID, timestamp, MAX(c) AS max_views_in_day_60d FROM by_day GROUP BY 1,2 ) SELECT e.UserID, e.timestamp, CASE WHEN COALESCE(a.visits_60d,0)>0 THEN COALESCE(m.max_views_in_day_60d,0)::DOUBLE / a.visits_60d ELSE 0 END AS frac_peak_day_60d, CASE WHEN COALESCE(a.visits_4d,0)>0 THEN COALESCE(m.max_views_in_day_60d,0)::DOUBLE / a.visits_4d ELSE 0 END AS peak_day_over_visits_4d FROM eval_table e LEFT JOIN agg a ON a.UserID=e.UserID AND a.timestamp=e.timestamp LEFT JOIN maxd m ON m.UserID=e.UserID AND m.timestamp=e.timestamp"
+    },
+    {
+      "name": "visit_ad_price_stats",
+      "sql": "WITH base AS ( SELECT e.UserID, e.timestamp, v.ViewDate, a.Price FROM eval_table e LEFT JOIN VisitStream v ON v.UserID = e.UserID AND v.ViewDate < e.timestamp AND v.ViewDate >= e.timestamp - INTERVAL '30 days' LEFT JOIN AdsInfo a ON a.AdID = v.AdID ) SELECT UserID, timestamp, AVG(Price) AS avg_price_30d, STDDEV_SAMP(Price) AS std_price_30d, MIN(Price) AS min_price_30d, MAX(Price) AS max_price_30d FROM base GROUP BY 1,2"
+    },
+    {
+      "name": "search_aggregates",
+      "sql": "WITH base AS ( SELECT e.UserID, e.timestamp, s.SearchDate, s.CategoryID, s.LocationID, ss.IsClick, ss.Position, ss.HistCTR FROM eval_table e LEFT JOIN SearchInfo s ON s.UserID = e.UserID AND s.SearchDate < e.timestamp AND s.SearchDate >= e.timestamp - INTERVAL '60 days' LEFT JOIN SearchStream ss ON ss.SearchID = s.SearchID AND ss.SearchDate = s.SearchDate ) SELECT UserID, timestamp, COUNT(DISTINCT SearchDate) AS n_search_events_60d, COUNT(*) AS n_search_rows_60d, AVG(IsClick) AS search_click_rate_60d, AVG(HistCTR) AS avg_histctr_60d, AVG(Position) AS avg_position_60d, COUNT(DISTINCT CategoryID) AS uniq_search_categories_60d, COUNT(DISTINCT LocationID) AS uniq_search_locations_60d, SUM(CASE WHEN SearchDate >= timestamp - INTERVAL '4 days' THEN 1 ELSE 0 END) AS n_search_rows_4d, AVG(CASE WHEN SearchDate >= timestamp - INTERVAL '4 days' THEN IsClick END) AS search_click_rate_4d, MIN(date_diff('second', SearchDate, timestamp)) AS sec_since_last_search FROM base GROUP BY 1,2"
+    },
+    {
+      "name": "time_context",
+      "sql": "SELECT UserID, timestamp, EXTRACT('day' FROM timestamp) AS day, EXTRACT('month' FROM timestamp) AS month FROM eval_table"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "catboost",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.032,
+    "max_depth": 5,
+    "l2_leaf_reg": 10.0
+  }
+}

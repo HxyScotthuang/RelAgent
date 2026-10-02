@@ -1,0 +1,32 @@
+{
+  "feature_queries": [
+    {
+      "name": "user_profile",
+      "sql": "SELECT e.user, e.timestamp, u.birthyear, (EXTRACT(year FROM e.timestamp) - u.birthyear) AS age, u.timezone, u.gender, u.locale, u.location, DATE_DIFF('day', u.joinedAt, e.timestamp) AS days_since_joined\nFROM eval_table e\nLEFT JOIN users u ON u.user_id = e.user"
+    },
+    {
+      "name": "time_features",
+      "sql": "SELECT\n  user,\n  timestamp,\n  EXTRACT(dow FROM timestamp) AS dow,\n  EXTRACT(month FROM timestamp) AS month,\n  EXTRACT(hour FROM timestamp) AS hour\nFROM eval_table"
+    },
+    {
+      "name": "invite_windows",
+      "sql": "WITH base AS (SELECT user, timestamp FROM eval_table), ei AS (\n  SELECT\n    user, timestamp, invited, interested, not_interested,\n    CASE WHEN invited = 1 AND interested = 0 AND not_interested = 0 THEN 1 ELSE 0 END AS ignored\n  FROM event_interest\n)\nSELECT\n  b.user, b.timestamp,\n  COUNT(*) FILTER (WHERE ei.invited=1 AND ei.timestamp >= b.timestamp - INTERVAL '7 days' AND ei.timestamp < b.timestamp) AS invited_7d,\n  COUNT(*) FILTER (WHERE ei.ignored=1 AND ei.timestamp >= b.timestamp - INTERVAL '7 days' AND ei.timestamp < b.timestamp) AS ignored_7d,\n  COUNT(*) FILTER (WHERE ei.invited=1 AND ei.timestamp >= b.timestamp - INTERVAL '30 days' AND ei.timestamp < b.timestamp) AS invited_30d,\n  COUNT(*) FILTER (WHERE ei.ignored=1 AND ei.timestamp >= b.timestamp - INTERVAL '30 days' AND ei.timestamp < b.timestamp) AS ignored_30d,\n  COUNT(*) FILTER (WHERE ei.invited=1 AND ei.timestamp >= b.timestamp - INTERVAL '90 days' AND ei.timestamp < b.timestamp) AS invited_90d,\n  COUNT(*) FILTER (WHERE ei.ignored=1 AND ei.timestamp >= b.timestamp - INTERVAL '90 days' AND ei.timestamp < b.timestamp) AS ignored_90d,\n  CASE WHEN COUNT(*) FILTER (WHERE ei.invited=1 AND ei.timestamp >= b.timestamp - INTERVAL '30 days' AND ei.timestamp < b.timestamp) > 0\n    THEN (COUNT(*) FILTER (WHERE ei.ignored=1 AND ei.timestamp >= b.timestamp - INTERVAL '30 days' AND ei.timestamp < b.timestamp) * 1.0) /\n         (COUNT(*) FILTER (WHERE ei.invited=1 AND ei.timestamp >= b.timestamp - INTERVAL '30 days' AND ei.timestamp < b.timestamp) * 1.0)\n  END AS ignored_rate_30d\nFROM base b\nLEFT JOIN ei ON ei.user=b.user AND ei.timestamp < b.timestamp\nGROUP BY b.user, b.timestamp"
+    },
+    {
+      "name": "attendance_windows_plus",
+      "sql": "WITH base AS (SELECT user, timestamp FROM eval_table), agg AS (\nSELECT\n  b.user, b.timestamp,\n  COUNT(*) FILTER (WHERE ea.start_time >= b.timestamp - INTERVAL '30 days' AND ea.start_time < b.timestamp) AS att_rows_30d,\n  COUNT(*) FILTER (WHERE ea.status='yes' AND ea.start_time >= b.timestamp - INTERVAL '30 days' AND ea.start_time < b.timestamp) AS att_yes_30d,\n  COUNT(*) FILTER (WHERE ea.status='no' AND ea.start_time >= b.timestamp - INTERVAL '30 days' AND ea.start_time < b.timestamp) AS att_no_30d,\n  COUNT(*) FILTER (WHERE ea.status='maybe' AND ea.start_time >= b.timestamp - INTERVAL '30 days' AND ea.start_time < b.timestamp) AS att_maybe_30d,\n  COUNT(*) FILTER (WHERE ea.status='invited' AND ea.start_time >= b.timestamp - INTERVAL '30 days' AND ea.start_time < b.timestamp) AS att_invited_30d,\n  COUNT(*) FILTER (WHERE ea.start_time >= b.timestamp - INTERVAL '90 days' AND ea.start_time < b.timestamp) AS att_rows_90d,\n  COUNT(*) FILTER (WHERE ea.status='yes' AND ea.start_time >= b.timestamp - INTERVAL '90 days' AND ea.start_time < b.timestamp) AS att_yes_90d,\n  COUNT(*) FILTER (WHERE ea.status='no' AND ea.start_time >= b.timestamp - INTERVAL '90 days' AND ea.start_time < b.timestamp) AS att_no_90d,\n  COUNT(*) FILTER (WHERE ea.status='maybe' AND ea.start_time >= b.timestamp - INTERVAL '90 days' AND ea.start_time < b.timestamp) AS att_maybe_90d,\n  COUNT(*) FILTER (WHERE ea.status='invited' AND ea.start_time >= b.timestamp - INTERVAL '90 days' AND ea.start_time < b.timestamp) AS att_invited_90d,\n  MIN(DATE_DIFF('day', ea.start_time, b.timestamp)) AS days_since_last_event_start\nFROM base b\nLEFT JOIN event_attendees ea\n  ON ea.user_id=b.user AND ea.start_time < b.timestamp\nGROUP BY b.user, b.timestamp\n)\nSELECT\n  user, timestamp,\n  *,\n  CASE WHEN (att_yes_30d + att_no_30d + att_maybe_30d) > 0 THEN att_no_30d * 1.0 / (att_yes_30d + att_no_30d + att_maybe_30d) END AS no_rate_30d,\n  CASE WHEN (att_yes_90d + att_no_90d + att_maybe_90d) > 0 THEN att_no_90d * 1.0 / (att_yes_90d + att_no_90d + att_maybe_90d) END AS no_rate_90d,\n  CASE WHEN att_rows_30d > 0 THEN att_invited_30d * 1.0 / att_rows_30d END AS invited_share_30d,\n  CASE WHEN att_rows_90d > 0 THEN att_invited_90d * 1.0 / att_rows_90d END AS invited_share_90d\nFROM agg"
+    },
+    {
+      "name": "friend_stats",
+      "sql": "WITH base AS (SELECT user, timestamp FROM eval_table)\nSELECT\n  b.user, b.timestamp,\n  COUNT(uf.friend) AS n_friends\nFROM base b\nLEFT JOIN user_friends uf ON uf.user=b.user\nGROUP BY b.user, b.timestamp"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "catboost",
+  "model_config": {
+    "n_estimators": 400,
+    "learning_rate": 0.05,
+    "max_depth": 6,
+    "l2_leaf_reg": 3.0
+  }
+}

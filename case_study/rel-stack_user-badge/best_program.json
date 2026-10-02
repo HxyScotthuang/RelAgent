@@ -1,0 +1,67 @@
+{
+  "feature_queries": [
+    {
+      "name": "user_base",
+      "sql": "SELECT e.UserId, e.timestamp,\n       DATE_DIFF('day', u.CreationDate, e.timestamp) AS account_age_days,\n       EXTRACT('month' FROM e.timestamp) AS asof_month,\n       CASE WHEN u.Location IS NULL THEN 0 ELSE 1 END AS has_location,\n       LENGTH(COALESCE(u.Location,'')) AS location_len,\n       CASE WHEN u.AboutMe IS NULL THEN 0 ELSE 1 END AS has_about,\n       LENGTH(COALESCE(u.AboutMe,'')) AS about_len\nFROM eval_table e\nLEFT JOIN users u ON u.Id = e.UserId"
+    },
+    {
+      "name": "badge_hist",
+      "sql": "SELECT e.UserId, e.timestamp,\n       COUNT(b.Id) AS badges_total,\n       SUM(CASE WHEN b.Date >= e.timestamp - INTERVAL '365 days' THEN 1 ELSE 0 END) AS badges_last365d,\n       SUM(CASE WHEN b.Date >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS badges_last90d,\n       SUM(CASE WHEN b.Date >= e.timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS badges_last30d,\n       COALESCE(DATE_DIFF('day', MAX(b.Date), e.timestamp), 99999) AS days_since_last_badge,\n       COUNT(DISTINCT b.Name) AS badge_name_diversity\nFROM eval_table e\nLEFT JOIN badges b\n  ON b.UserId = e.UserId AND b.Date < e.timestamp\nGROUP BY e.UserId, e.timestamp"
+    },
+    {
+      "name": "badge_composition",
+      "sql": "SELECT e.UserId, e.timestamp,\n       SUM(CASE WHEN b.Class=1 THEN 1 ELSE 0 END) AS badges_class1_total,\n       SUM(CASE WHEN b.Class=2 THEN 1 ELSE 0 END) AS badges_class2_total,\n       SUM(CASE WHEN b.Class=3 THEN 1 ELSE 0 END) AS badges_class3_total,\n       SUM(CASE WHEN b.TagBased THEN 1 ELSE 0 END) AS badges_tagbased_total,\n       SUM(CASE WHEN b.Date >= e.timestamp - INTERVAL '90 days' AND b.Class=1 THEN 1 ELSE 0 END) AS badges_class1_90d,\n       SUM(CASE WHEN b.Date >= e.timestamp - INTERVAL '90 days' AND b.Class=2 THEN 1 ELSE 0 END) AS badges_class2_90d,\n       SUM(CASE WHEN b.Date >= e.timestamp - INTERVAL '90 days' AND b.Class=3 THEN 1 ELSE 0 END) AS badges_class3_90d,\n       SUM(CASE WHEN b.Date >= e.timestamp - INTERVAL '90 days' AND b.TagBased THEN 1 ELSE 0 END) AS badges_tagbased_90d\nFROM eval_table e\nLEFT JOIN badges b ON b.UserId=e.UserId AND b.Date < e.timestamp\nGROUP BY e.UserId, e.timestamp"
+    },
+    {
+      "name": "posts_agg",
+      "sql": "SELECT e.UserId, e.timestamp,\n       COUNT(p.Id) AS posts_total,\n       SUM(CASE WHEN p.CreationDate >= e.timestamp - INTERVAL '365 days' THEN 1 ELSE 0 END) AS posts_last365d,\n       SUM(CASE WHEN p.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS posts_last90d,\n       SUM(CASE WHEN p.CreationDate >= e.timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS posts_last30d,\n       SUM(CASE WHEN p.CreationDate >= e.timestamp - INTERVAL '7 days' THEN 1 ELSE 0 END) AS posts_last7d,\n       SUM(CASE WHEN p.PostTypeId = 1 THEN 1 ELSE 0 END) AS questions_total,\n       SUM(CASE WHEN p.PostTypeId = 2 THEN 1 ELSE 0 END) AS answers_total,\n       SUM(CASE WHEN p.PostTypeId = 1 AND p.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS questions_last90d,\n       SUM(CASE WHEN p.PostTypeId = 2 AND p.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS answers_last90d,\n       COALESCE(DATE_DIFF('day', MAX(p.CreationDate), e.timestamp), 99999) AS days_since_last_post\nFROM eval_table e\nLEFT JOIN posts p\n  ON p.OwnerUserId = e.UserId AND p.CreationDate < e.timestamp\nGROUP BY e.UserId, e.timestamp"
+    },
+    {
+      "name": "comments_agg",
+      "sql": "SELECT e.UserId, e.timestamp,\n       COUNT(c.Id) AS comments_total,\n       SUM(CASE WHEN c.CreationDate >= e.timestamp - INTERVAL '365 days' THEN 1 ELSE 0 END) AS comments_last365d,\n       SUM(CASE WHEN c.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS comments_last90d,\n       SUM(CASE WHEN c.CreationDate >= e.timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS comments_last30d,\n       COALESCE(DATE_DIFF('day', MAX(c.CreationDate), e.timestamp), 99999) AS days_since_last_comment\nFROM eval_table e\nLEFT JOIN comments c\n  ON c.UserId = e.UserId AND c.CreationDate < e.timestamp\nGROUP BY e.UserId, e.timestamp"
+    },
+    {
+      "name": "posthist_agg",
+      "sql": "SELECT e.UserId, e.timestamp,\n       COUNT(ph.Id) AS posthist_total,\n       SUM(CASE WHEN ph.CreationDate >= e.timestamp - INTERVAL '365 days' THEN 1 ELSE 0 END) AS posthist_last365d,\n       SUM(CASE WHEN ph.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS posthist_last90d,\n       SUM(CASE WHEN ph.CreationDate >= e.timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS posthist_last30d,\n       COUNT(DISTINCT ph.PostHistoryTypeId) AS posthist_type_diversity,\n       COALESCE(DATE_DIFF('day', MAX(ph.CreationDate), e.timestamp), 99999) AS days_since_last_posthist\nFROM eval_table e\nLEFT JOIN postHistory ph\n  ON ph.UserId = e.UserId AND ph.CreationDate < e.timestamp\nGROUP BY e.UserId, e.timestamp"
+    },
+    {
+      "name": "posthist_on_own_posts",
+      "sql": "SELECT e.UserId, e.timestamp,\n       COUNT(ph.Id) AS posthist_on_own_posts_total,\n       SUM(CASE WHEN ph.CreationDate >= e.timestamp - INTERVAL '365 days' THEN 1 ELSE 0 END) AS posthist_on_own_posts_365d,\n       SUM(CASE WHEN ph.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS posthist_on_own_posts_90d,\n       SUM(CASE WHEN ph.CreationDate >= e.timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS posthist_on_own_posts_30d,\n       COUNT(DISTINCT ph.PostHistoryTypeId) AS posthist_on_own_posts_type_diversity,\n       COALESCE(DATE_DIFF('day', MAX(ph.CreationDate), e.timestamp), 99999) AS days_since_last_posthist_on_own_posts\nFROM eval_table e\nLEFT JOIN posts p\n  ON p.OwnerUserId = e.UserId AND p.CreationDate < e.timestamp\nLEFT JOIN postHistory ph\n  ON ph.PostId = p.Id AND ph.CreationDate < e.timestamp\nGROUP BY e.UserId, e.timestamp"
+    },
+    {
+      "name": "postlinks_agg",
+      "sql": "SELECT e.UserId, e.timestamp,\n       COUNT(pl.Id) AS postlinks_total,\n       SUM(CASE WHEN pl.CreationDate >= e.timestamp - INTERVAL '365 days' THEN 1 ELSE 0 END) AS postlinks_last365d,\n       SUM(CASE WHEN pl.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS postlinks_last90d,\n       SUM(CASE WHEN pl.CreationDate >= e.timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS postlinks_last30d\nFROM eval_table e\nLEFT JOIN posts p ON p.OwnerUserId = e.UserId AND p.CreationDate < e.timestamp\nLEFT JOIN postLinks pl ON pl.PostId = p.Id AND pl.CreationDate < e.timestamp\nGROUP BY e.UserId, e.timestamp"
+    },
+    {
+      "name": "postlinks_on_own_posts",
+      "sql": "SELECT e.UserId, e.timestamp,\n       COUNT(pl.Id) AS postlinks_on_own_posts_total,\n       SUM(CASE WHEN pl.CreationDate >= e.timestamp - INTERVAL '365 days' THEN 1 ELSE 0 END) AS postlinks_on_own_posts_365d,\n       SUM(CASE WHEN pl.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS postlinks_on_own_posts_90d,\n       SUM(CASE WHEN pl.CreationDate >= e.timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS postlinks_on_own_posts_30d,\n       COUNT(DISTINCT pl.LinkTypeId) AS postlinks_on_own_posts_type_diversity,\n       COALESCE(DATE_DIFF('day', MAX(pl.CreationDate), e.timestamp), 99999) AS days_since_last_postlink_on_own_posts\nFROM eval_table e\nLEFT JOIN posts p ON p.OwnerUserId=e.UserId AND p.CreationDate < e.timestamp\nLEFT JOIN postLinks pl ON pl.PostId=p.Id AND pl.CreationDate < e.timestamp\nGROUP BY e.UserId, e.timestamp"
+    },
+    {
+      "name": "external_comments_on_own_posts",
+      "sql": "SELECT e.UserId, e.timestamp,\n       COUNT(c.Id) AS ext_comments_on_own_posts_total,\n       SUM(CASE WHEN c.CreationDate >= e.timestamp - INTERVAL '365 days' THEN 1 ELSE 0 END) AS ext_comments_on_own_posts_365d,\n       SUM(CASE WHEN c.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS ext_comments_on_own_posts_90d,\n       SUM(CASE WHEN c.CreationDate >= e.timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS ext_comments_on_own_posts_30d,\n       COUNT(DISTINCT c.UserId) AS ext_commenters_distinct_total,\n       COALESCE(DATE_DIFF('day', MAX(c.CreationDate), e.timestamp), 99999) AS days_since_last_ext_comment_on_own_posts\nFROM eval_table e\nLEFT JOIN posts p ON p.OwnerUserId=e.UserId AND p.CreationDate < e.timestamp\nLEFT JOIN comments c ON c.PostId=p.Id AND c.CreationDate < e.timestamp AND c.UserId != e.UserId\nGROUP BY e.UserId, e.timestamp"
+    },
+    {
+      "name": "votes_cast_agg",
+      "sql": "SELECT e.UserId, e.timestamp,\n       COUNT(v.Id) AS votes_cast_total,\n       SUM(CASE WHEN v.CreationDate >= e.timestamp - INTERVAL '365 days' THEN 1 ELSE 0 END) AS votes_cast_last365d,\n       SUM(CASE WHEN v.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS votes_cast_last90d,\n       SUM(CASE WHEN v.CreationDate >= e.timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS votes_cast_last30d,\n       COUNT(DISTINCT v.VoteTypeId) AS vote_cast_type_diversity\nFROM eval_table e\nLEFT JOIN votes v\n  ON v.UserId = e.UserId AND v.CreationDate < e.timestamp\nGROUP BY e.UserId, e.timestamp"
+    },
+    {
+      "name": "votes_received_on_posts",
+      "sql": "SELECT e.UserId, e.timestamp,\n       COUNT(v.Id) AS votes_recv_total,\n       SUM(CASE WHEN v.CreationDate >= e.timestamp - INTERVAL '365 days' THEN 1 ELSE 0 END) AS votes_recv_last365d,\n       SUM(CASE WHEN v.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS votes_recv_last90d,\n       SUM(CASE WHEN v.CreationDate >= e.timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS votes_recv_last30d,\n       SUM(CASE WHEN v.VoteTypeId = 2 THEN 1 ELSE 0 END) AS upvotes_recv_total,\n       SUM(CASE WHEN v.VoteTypeId = 3 THEN 1 ELSE 0 END) AS downvotes_recv_total,\n       SUM(CASE WHEN v.VoteTypeId = 2 AND v.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS upvotes_recv_last90d,\n       SUM(CASE WHEN v.VoteTypeId = 3 AND v.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS downvotes_recv_last90d,\n       COUNT(DISTINCT v.UserId) AS distinct_voters_total,\n       COUNT(DISTINCT CASE WHEN v.CreationDate >= e.timestamp - INTERVAL '90 days' THEN v.UserId END) AS distinct_voters_90d,\n       COUNT(DISTINCT CASE WHEN v.CreationDate >= e.timestamp - INTERVAL '365 days' THEN v.UserId END) AS distinct_voters_365d,\n       COALESCE(DATE_DIFF('day', MAX(v.CreationDate), e.timestamp), 99999) AS days_since_last_vote_recv\nFROM eval_table e\nLEFT JOIN posts p\n  ON p.OwnerUserId = e.UserId AND p.CreationDate < e.timestamp\nLEFT JOIN votes v\n  ON v.PostId = p.Id AND v.CreationDate < e.timestamp\nGROUP BY e.UserId, e.timestamp"
+    },
+    {
+      "name": "ratios_from_aggs",
+      "sql": "WITH p AS (\n  SELECT e.UserId, e.timestamp,\n         SUM(CASE WHEN posts.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS posts_90,\n         SUM(CASE WHEN posts.CreationDate >= e.timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS posts_30,\n         SUM(CASE WHEN posts.CreationDate >= e.timestamp - INTERVAL '7 days' THEN 1 ELSE 0 END) AS posts_7,\n         SUM(CASE WHEN posts.PostTypeId=2 AND posts.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS ans_90,\n         SUM(CASE WHEN posts.PostTypeId=1 AND posts.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS q_90\n  FROM eval_table e\n  LEFT JOIN posts ON posts.OwnerUserId=e.UserId AND posts.CreationDate < e.timestamp\n  GROUP BY e.UserId, e.timestamp\n),\n b AS (\n  SELECT e.UserId, e.timestamp,\n         SUM(CASE WHEN badges.Date >= e.timestamp - INTERVAL '365 days' THEN 1 ELSE 0 END) AS badge_365,\n         SUM(CASE WHEN badges.Date >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS badge_90\n  FROM eval_table e\n  LEFT JOIN badges ON badges.UserId=e.UserId AND badges.Date < e.timestamp\n  GROUP BY e.UserId, e.timestamp\n),\n c AS (\n  SELECT e.UserId, e.timestamp,\n         SUM(CASE WHEN comments.CreationDate >= e.timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS comm_90\n  FROM eval_table e\n  LEFT JOIN comments ON comments.UserId=e.UserId AND comments.CreationDate < e.timestamp\n  GROUP BY e.UserId, e.timestamp\n)\nSELECT p.UserId, p.timestamp,\n       CASE WHEN posts_90>0 THEN 1 ELSE 0 END AS has_posts_90d,\n       CASE WHEN posts_30>0 THEN 1 ELSE 0 END AS has_posts_30d,\n       COALESCE(ans_90 * 1.0 / NULLIF(posts_90,0), 0.0) AS frac_answers_90d,\n       COALESCE(q_90 * 1.0 / NULLIF(posts_90,0), 0.0) AS frac_questions_90d,\n       COALESCE(comm_90 * 1.0 / NULLIF(posts_90,0), 0.0) AS comments_per_post_90d,\n       COALESCE(badge_90 * 1.0 / NULLIF(posts_90,0), 0.0) AS badges_per_post_90d,\n       COALESCE(badge_365 * 1.0 / NULLIF(posts_90,0), 0.0) AS badges_per_post_365_over_posts90,\n       COALESCE(posts_7 * 1.0 / NULLIF(posts_30,0), 0.0) AS velocity_7_over_30,\n       COALESCE(posts_30 * 1.0 / NULLIF(posts_90,0), 0.0) AS velocity_30_over_90\nFROM p\nLEFT JOIN b USING (UserId, timestamp)\nLEFT JOIN c USING (UserId, timestamp)"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "xgboost",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.05,
+    "max_depth": 7,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_weight": 25,
+    "reg_lambda": 2.0
+  }
+}

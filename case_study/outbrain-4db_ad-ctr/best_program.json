@@ -1,0 +1,32 @@
+{
+  "feature_queries": [
+    {
+      "name": "time",
+      "sql": "SELECT\n  e.display_id,\n  e.timestamp,\n  EXTRACT(hour FROM e.timestamp) AS hour_of_day,\n  EXTRACT(dow FROM e.timestamp) AS day_of_week\nFROM eval_table e"
+    },
+    {
+      "name": "ad_meta",
+      "sql": "SELECT\n  e.display_id,\n  e.timestamp,\n  pc.campaign_id,\n  pc.advertiser_id\nFROM eval_table e\nLEFT JOIN PromotedContent pc ON e.ad_id = pc.ad_id"
+    },
+    {
+      "name": "ad_hist_prior10",
+      "sql": "WITH global AS (SELECT AVG(clicked*1.0) AS gctr FROM train_table),\nclicks_labeled AS (\n  SELECT c.ad_id, c.timestamp, tt.clicked\n  FROM Click c\n  JOIN train_table tt\n    ON tt.display_id=c.display_id\n   AND tt.ad_id=c.ad_id\n   AND tt.timestamp=c.timestamp\n), agg AS (\nSELECT\n  e.display_id,\n  e.timestamp,\n  COUNT(cl.clicked) AS ad_imps,\n  SUM(cl.clicked) AS ad_clicks,\n  SUM(CASE WHEN cl.timestamp >= e.timestamp - INTERVAL '1 day' THEN 1 ELSE 0 END) AS ad_imps_1d,\n  SUM(CASE WHEN cl.timestamp >= e.timestamp - INTERVAL '7 day' THEN 1 ELSE 0 END) AS ad_imps_7d,\n  AVG(CASE WHEN cl.timestamp >= e.timestamp - INTERVAL '1 day' THEN cl.clicked*1.0 END) AS ad_ctr_1d\nFROM eval_table e\nLEFT JOIN clicks_labeled cl\n  ON cl.ad_id = e.ad_id\n AND cl.timestamp < e.timestamp\nGROUP BY e.display_id, e.timestamp\n)\nSELECT\n  a.display_id,\n  a.timestamp,\n  a.ad_imps,\n  a.ad_clicks,\n  LN(1 + a.ad_imps) AS log_ad_imps,\n  LN(1 + a.ad_clicks) AS log_ad_clicks,\n  (a.ad_clicks + 10 * (SELECT gctr FROM global)) / (a.ad_imps + 10) AS ad_ctr_smooth_10,\n  a.ad_imps_1d,\n  a.ad_imps_7d,\n  a.ad_ctr_1d,\n  CASE WHEN a.ad_imps > 0 THEN 1 ELSE 0 END AS has_ad_hist,\n  CASE\n    WHEN a.ad_imps = 0 THEN 0\n    WHEN a.ad_imps BETWEEN 1 AND 2 THEN 1\n    WHEN a.ad_imps BETWEEN 3 AND 5 THEN 2\n    WHEN a.ad_imps BETWEEN 6 AND 10 THEN 3\n    WHEN a.ad_imps BETWEEN 11 AND 20 THEN 4\n    WHEN a.ad_imps BETWEEN 21 AND 50 THEN 5\n    ELSE 6\n  END AS ad_imps_bin,\n  CASE\n    WHEN (a.ad_clicks + 10 * (SELECT gctr FROM global)) / (a.ad_imps + 10) < 0.08 THEN 0\n    WHEN (a.ad_clicks + 10 * (SELECT gctr FROM global)) / (a.ad_imps + 10) < 0.12 THEN 1\n    WHEN (a.ad_clicks + 10 * (SELECT gctr FROM global)) / (a.ad_imps + 10) < 0.17 THEN 2\n    WHEN (a.ad_clicks + 10 * (SELECT gctr FROM global)) / (a.ad_imps + 10) < 0.23 THEN 3\n    WHEN (a.ad_clicks + 10 * (SELECT gctr FROM global)) / (a.ad_imps + 10) < 0.30 THEN 4\n    ELSE 5\n  END AS ad_ctr_bin\nFROM agg a"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "catboost",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.06,
+    "max_depth": 6,
+    "l2_leaf_reg": 5.0,
+    "categorical_features": [
+      "ad_meta__campaign_id",
+      "ad_meta__advertiser_id",
+      "time__hour_of_day",
+      "time__day_of_week",
+      "ad_hist_prior10__ad_imps_bin",
+      "ad_hist_prior10__ad_ctr_bin"
+    ]
+  }
+}

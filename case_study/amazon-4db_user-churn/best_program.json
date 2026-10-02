@@ -1,0 +1,68 @@
+{
+  "feature_queries": [
+    {
+      "name": "cust_recency_freq",
+      "sql": "WITH hist AS ( SELECT e.customer_id, e.timestamp, r.review_time, r.rating, r.verified, r.product_id FROM eval_table e LEFT JOIN Review r ON r.customer_id=e.customer_id AND r.review_time < e.timestamp ) SELECT customer_id, timestamp, COUNT(review_time) AS n_reviews_before, COUNT(DISTINCT product_id) AS n_products_before, AVG(CASE WHEN verified THEN 1.0 ELSE 0.0 END) AS frac_verified_before, AVG(rating) AS avg_rating_before, STDDEV_SAMP(rating) AS std_rating_before, DATE_DIFF('day', MAX(review_time), timestamp) AS days_since_last_review, DATE_DIFF('day', MIN(review_time), timestamp) AS days_since_first_review, SUM(CASE WHEN review_time >= timestamp - INTERVAL '1 days' THEN 1 ELSE 0 END) AS n_reviews_1d, SUM(CASE WHEN review_time >= timestamp - INTERVAL '3 days' THEN 1 ELSE 0 END) AS n_reviews_3d, SUM(CASE WHEN review_time >= timestamp - INTERVAL '7 days' THEN 1 ELSE 0 END) AS n_reviews_7d, SUM(CASE WHEN review_time >= timestamp - INTERVAL '14 days' THEN 1 ELSE 0 END) AS n_reviews_14d, SUM(CASE WHEN review_time >= timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS n_reviews_30d, SUM(CASE WHEN review_time >= timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS n_reviews_90d, SUM(CASE WHEN review_time >= timestamp - INTERVAL '180 days' THEN 1 ELSE 0 END) AS n_reviews_180d FROM hist GROUP BY customer_id, timestamp"
+    },
+    {
+      "name": "cust_calendar",
+      "sql": "WITH hist AS ( SELECT e.customer_id, e.timestamp, r.review_time FROM eval_table e LEFT JOIN Review r ON r.customer_id=e.customer_id AND r.review_time < e.timestamp ), cal AS ( SELECT customer_id, timestamp, EXTRACT('dow' FROM review_time) AS dow FROM hist WHERE review_time IS NOT NULL ) SELECT customer_id, timestamp, COUNT(DISTINCT dow) AS n_dow_used, AVG(dow) AS avg_dow, STDDEV_SAMP(dow) AS std_dow FROM cal GROUP BY customer_id, timestamp"
+    },
+    {
+      "name": "cust_products_recent",
+      "sql": "WITH hist AS ( SELECT e.customer_id, e.timestamp, r.review_time, r.product_id FROM eval_table e LEFT JOIN Review r ON r.customer_id=e.customer_id AND r.review_time < e.timestamp ) SELECT customer_id, timestamp, COUNT(DISTINCT CASE WHEN review_time >= timestamp - INTERVAL '30 days' THEN product_id END) AS n_products_30d, COUNT(DISTINCT CASE WHEN review_time >= timestamp - INTERVAL '90 days' THEN product_id END) AS n_products_90d, COUNT(DISTINCT CASE WHEN review_time >= timestamp - INTERVAL '180 days' THEN product_id END) AS n_products_180d FROM hist GROUP BY customer_id, timestamp"
+    },
+    {
+      "name": "cust_repeat_rate",
+      "sql": "WITH hist AS ( SELECT e.customer_id, e.timestamp, r.review_time, r.product_id FROM eval_table e LEFT JOIN Review r ON r.customer_id=e.customer_id AND r.review_time < e.timestamp ), ordered AS ( SELECT customer_id, timestamp, review_time, product_id, ROW_NUMBER() OVER (PARTITION BY customer_id, timestamp ORDER BY review_time) AS rn FROM hist WHERE review_time IS NOT NULL ), with_prev AS ( SELECT customer_id, timestamp, product_id, rn, MIN(rn) OVER (PARTITION BY customer_id, timestamp, product_id) AS first_rn FROM ordered ) SELECT customer_id, timestamp, SUM(CASE WHEN rn>first_rn THEN 1 ELSE 0 END) AS n_repeat_reviews_before, COUNT(*) AS n_reviews_before_nonnull, CASE WHEN COUNT(*)=0 THEN NULL ELSE SUM(CASE WHEN rn>first_rn THEN 1 ELSE 0 END)::DOUBLE/COUNT(*) END AS repeat_review_frac FROM with_prev GROUP BY customer_id, timestamp"
+    },
+    {
+      "name": "cust_text",
+      "sql": "WITH hist AS ( SELECT e.customer_id, e.timestamp, r.review_time, r.review_text, r.summary FROM eval_table e LEFT JOIN Review r ON r.customer_id=e.customer_id AND r.review_time < e.timestamp ) SELECT customer_id, timestamp, AVG(LENGTH(COALESCE(review_text,''))) AS avg_review_text_len, AVG(LENGTH(COALESCE(summary,''))) AS avg_summary_len, SUM(CASE WHEN review_text IS NULL OR LENGTH(review_text)=0 THEN 1 ELSE 0 END) AS n_empty_text, AVG(CASE WHEN review_time >= timestamp - INTERVAL '30 days' THEN LENGTH(COALESCE(review_text,'')) END) AS avg_review_text_len_30d, AVG(CASE WHEN review_time >= timestamp - INTERVAL '30 days' THEN LENGTH(COALESCE(summary,'')) END) AS avg_summary_len_30d, AVG(CASE WHEN review_time >= timestamp - INTERVAL '30 days' THEN LENGTH(regexp_replace(COALESCE(review_text,''),'[^!]','', 'g')) END) AS avg_exclam_30d, AVG(CASE WHEN review_time >= timestamp - INTERVAL '30 days' THEN LENGTH(regexp_replace(COALESCE(review_text,''),'[^?]','', 'g')) END) AS avg_question_30d FROM hist GROUP BY customer_id, timestamp"
+    },
+    {
+      "name": "cust_lastk_short",
+      "sql": "WITH ordered AS ( SELECT e.customer_id, e.timestamp, r.review_time, ROW_NUMBER() OVER (PARTITION BY e.customer_id, e.timestamp ORDER BY r.review_time DESC) AS rn FROM eval_table e LEFT JOIN Review r ON r.customer_id=e.customer_id AND r.review_time < e.timestamp ) SELECT customer_id, timestamp, DATE_DIFF('day', MAX(CASE WHEN rn=1 THEN review_time END), timestamp) AS days_since_last_1, DATE_DIFF('day', MAX(CASE WHEN rn=2 THEN review_time END), timestamp) AS days_since_last_2, DATE_DIFF('day', MAX(CASE WHEN rn=3 THEN review_time END), timestamp) AS days_since_last_3, DATE_DIFF('day', MAX(CASE WHEN rn=5 THEN review_time END), timestamp) AS days_since_last_5, DATE_DIFF('day', MAX(CASE WHEN rn=10 THEN review_time END), timestamp) AS days_since_last_10 FROM ordered GROUP BY customer_id, timestamp"
+    },
+    {
+      "name": "cust_lastk_long",
+      "sql": "WITH ordered AS ( SELECT e.customer_id, e.timestamp, r.review_time, ROW_NUMBER() OVER (PARTITION BY e.customer_id, e.timestamp ORDER BY r.review_time DESC) AS rn FROM eval_table e LEFT JOIN Review r ON r.customer_id=e.customer_id AND r.review_time < e.timestamp ) SELECT customer_id, timestamp, DATE_DIFF('day', MAX(CASE WHEN rn=20 THEN review_time END), timestamp) AS days_since_last_20 FROM ordered GROUP BY customer_id, timestamp"
+    },
+    {
+      "name": "cust_gaps",
+      "sql": "WITH ordered AS ( SELECT e.customer_id, e.timestamp, r.review_time, LAG(r.review_time) OVER (PARTITION BY e.customer_id, e.timestamp ORDER BY r.review_time) AS prev_time FROM eval_table e LEFT JOIN Review r ON r.customer_id=e.customer_id AND r.review_time < e.timestamp ), gaps AS ( SELECT customer_id, timestamp, DATE_DIFF('day', prev_time, review_time) AS gap_days FROM ordered WHERE prev_time IS NOT NULL ), agg AS ( SELECT customer_id, timestamp, AVG(gap_days) AS avg_gap_days, STDDEV_SAMP(gap_days) AS std_gap_days, MAX(gap_days) AS max_gap_days, MIN(gap_days) AS min_gap_days FROM gaps GROUP BY customer_id, timestamp ) SELECT customer_id, timestamp, avg_gap_days, std_gap_days, max_gap_days, min_gap_days, CASE WHEN avg_gap_days IS NULL OR avg_gap_days=0 THEN NULL ELSE max_gap_days/avg_gap_days END AS max_to_avg_gap, CASE WHEN avg_gap_days IS NULL THEN NULL ELSE std_gap_days/(1+avg_gap_days) END AS cv_gap_days FROM agg"
+    },
+    {
+      "name": "cust_trend",
+      "sql": "WITH hist AS ( SELECT e.customer_id, e.timestamp, r.review_time FROM eval_table e LEFT JOIN Review r ON r.customer_id=e.customer_id AND r.review_time < e.timestamp ), buckets AS ( SELECT customer_id, timestamp, SUM(CASE WHEN review_time >= timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS n_0_30, SUM(CASE WHEN review_time < timestamp - INTERVAL '30 days' AND review_time >= timestamp - INTERVAL '60 days' THEN 1 ELSE 0 END) AS n_30_60, SUM(CASE WHEN review_time < timestamp - INTERVAL '60 days' AND review_time >= timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS n_60_90, SUM(CASE WHEN review_time < timestamp - INTERVAL '90 days' AND review_time >= timestamp - INTERVAL '180 days' THEN 1 ELSE 0 END) AS n_90_180 FROM hist GROUP BY customer_id, timestamp ) SELECT customer_id, timestamp, n_0_30, n_30_60, n_60_90, n_90_180, (n_0_30 - n_30_60) AS delta_0_30_vs_30_60, (n_30_60 - n_60_90) AS delta_30_60_vs_60_90, CASE WHEN (n_30_60+n_60_90+n_90_180)=0 THEN NULL ELSE n_0_30::DOUBLE/(n_30_60+n_60_90+n_90_180) END AS recent_share_30d_over_prev150d FROM buckets"
+    },
+    {
+      "name": "cust_ratios",
+      "sql": "WITH base AS ( SELECT e.customer_id, e.timestamp, SUM(CASE WHEN r.review_time < e.timestamp THEN 1 ELSE 0 END) AS n_before, SUM(CASE WHEN r.review_time >= e.timestamp - INTERVAL '7 days' AND r.review_time < e.timestamp THEN 1 ELSE 0 END) AS n_7d, SUM(CASE WHEN r.review_time >= e.timestamp - INTERVAL '14 days' AND r.review_time < e.timestamp THEN 1 ELSE 0 END) AS n_14d, SUM(CASE WHEN r.review_time >= e.timestamp - INTERVAL '30 days' AND r.review_time < e.timestamp THEN 1 ELSE 0 END) AS n_30d, SUM(CASE WHEN r.review_time >= e.timestamp - INTERVAL '180 days' AND r.review_time < e.timestamp THEN 1 ELSE 0 END) AS n_180d FROM eval_table e LEFT JOIN Review r ON r.customer_id=e.customer_id GROUP BY e.customer_id, e.timestamp ) SELECT customer_id, timestamp, CASE WHEN n_before=0 THEN NULL ELSE n_7d::DOUBLE/n_before END AS frac_reviews_7d_of_all, CASE WHEN n_before=0 THEN NULL ELSE n_14d::DOUBLE/n_before END AS frac_reviews_14d_of_all, CASE WHEN n_before=0 THEN NULL ELSE n_30d::DOUBLE/n_before END AS frac_reviews_30d_of_all, CASE WHEN n_180d=0 THEN NULL ELSE n_7d::DOUBLE/n_180d END AS frac_reviews_7d_of_180d, CASE WHEN n_180d=0 THEN NULL ELSE n_14d::DOUBLE/n_180d END AS frac_reviews_14d_of_180d, CASE WHEN n_180d=0 THEN NULL ELSE n_30d::DOUBLE/n_180d END AS frac_reviews_30d_of_180d FROM base"
+    },
+    {
+      "name": "cust_active_days",
+      "sql": "WITH hist AS ( SELECT e.customer_id, e.timestamp, r.review_time::DATE AS review_date FROM eval_table e LEFT JOIN Review r ON r.customer_id=e.customer_id AND r.review_time < e.timestamp ), days AS ( SELECT customer_id, timestamp, review_date, COUNT(*) AS n_reviews_that_day FROM hist WHERE review_date IS NOT NULL GROUP BY customer_id, timestamp, review_date ) SELECT customer_id, timestamp, SUM(CASE WHEN review_date >= (timestamp - INTERVAL '30 days')::DATE THEN 1 ELSE 0 END) AS active_days_30d, SUM(CASE WHEN review_date >= (timestamp - INTERVAL '90 days')::DATE THEN 1 ELSE 0 END) AS active_days_90d, MAX(CASE WHEN review_date >= (timestamp - INTERVAL '30 days')::DATE THEN n_reviews_that_day ELSE NULL END) AS max_reviews_in_a_day_30d, MAX(CASE WHEN review_date >= (timestamp - INTERVAL '90 days')::DATE THEN n_reviews_that_day ELSE NULL END) AS max_reviews_in_a_day_90d FROM days GROUP BY customer_id, timestamp"
+    },
+    {
+      "name": "cust_product_price",
+      "sql": "WITH hist AS ( SELECT e.customer_id, e.timestamp, p.price FROM eval_table e LEFT JOIN Review r ON r.customer_id=e.customer_id AND r.review_time < e.timestamp LEFT JOIN Product p ON p.product_id=r.product_id ) SELECT customer_id, timestamp, AVG(price) AS avg_price_reviewed, STDDEV_SAMP(price) AS std_price_reviewed, MIN(price) AS min_price_reviewed, MAX(price) AS max_price_reviewed FROM hist GROUP BY customer_id, timestamp"
+    },
+    {
+      "name": "cust_category_brand_bucket",
+      "sql": "WITH hist AS ( SELECT e.customer_id, e.timestamp, p.category, p.brand FROM eval_table e LEFT JOIN Review r ON r.customer_id=e.customer_id AND r.review_time < e.timestamp LEFT JOIN Product p ON p.product_id=r.product_id ), counts_cat AS ( SELECT customer_id, timestamp, category, COUNT(*) AS n FROM hist GROUP BY customer_id, timestamp, category ), counts_brand AS ( SELECT customer_id, timestamp, brand, COUNT(*) AS n FROM hist GROUP BY customer_id, timestamp, brand ), top_cat AS ( SELECT customer_id, timestamp, arg_max(category, n) AS top_category FROM counts_cat GROUP BY customer_id, timestamp ), top_brand AS ( SELECT customer_id, timestamp, arg_max(brand, n) AS top_brand FROM counts_brand GROUP BY customer_id, timestamp ), div AS ( SELECT customer_id, timestamp, COUNT(DISTINCT category) AS n_categories, COUNT(DISTINCT brand) AS n_brands FROM hist GROUP BY customer_id, timestamp ) SELECT d.customer_id, d.timestamp, d.n_categories, d.n_brands, CASE WHEN c.top_category IS NULL THEN '__NA__' WHEN LENGTH(c.top_category) > 50 THEN SUBSTR(c.top_category,1,50) ELSE c.top_category END AS top_category_bkt, CASE WHEN b.top_brand IS NULL THEN '__NA__' WHEN LENGTH(b.top_brand) > 50 THEN SUBSTR(b.top_brand,1,50) ELSE b.top_brand END AS top_brand_bkt FROM div d LEFT JOIN top_cat c ON c.customer_id=d.customer_id AND c.timestamp=d.timestamp LEFT JOIN top_brand b ON b.customer_id=d.customer_id AND b.timestamp=d.timestamp"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "catboost",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.05,
+    "max_depth": 8,
+    "l2_leaf_reg": 6.0,
+    "categorical_features": [
+      "cust_category_brand_bucket__top_category_bkt",
+      "cust_category_brand_bucket__top_brand_bkt"
+    ]
+  }
+}

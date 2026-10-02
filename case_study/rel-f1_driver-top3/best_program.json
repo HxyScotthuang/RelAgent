@@ -1,0 +1,52 @@
+{
+  "feature_queries": [
+    {
+      "name": "asof_race_info",
+      "sql": "WITH last_race_id AS (\n  SELECT e.driverId, e.date, ARG_MAX(r.raceId, r.date) AS last_raceId\n  FROM eval_table e\n  LEFT JOIN results r\n    ON r.driverId=e.driverId AND r.date < e.date\n  GROUP BY e.driverId, e.date\n)\nSELECT e.driverId, e.date,\n       ra.year AS asof_year,\n       ra.round AS asof_round,\n       ra.circuitId AS asof_circuitId\nFROM eval_table e\nLEFT JOIN last_race_id lri ON lri.driverId=e.driverId AND lri.date=e.date\nLEFT JOIN races ra ON ra.raceId = lri.last_raceId"
+    },
+    {
+      "name": "season_to_date_driver",
+      "sql": "WITH as_of_year AS (\n  SELECT e.driverId, e.date,\n         ARG_MAX(ra.year, res.date) AS asof_year\n  FROM eval_table e\n  LEFT JOIN results res\n    ON res.driverId=e.driverId AND res.date < e.date\n  LEFT JOIN races ra\n    ON ra.raceId = res.raceId\n  GROUP BY e.driverId, e.date\n), base AS (\n  SELECT e.driverId, e.date, ra.year, res.points, res.positionOrder, res.grid\n  FROM eval_table e\n  LEFT JOIN results res\n    ON res.driverId=e.driverId AND res.date < e.date\n  LEFT JOIN races ra\n    ON ra.raceId = res.raceId\n)\nSELECT b.driverId, b.date,\n       SUM(CASE WHEN b.year = ay.asof_year THEN 1 ELSE 0 END) AS season_races_cnt,\n       SUM(CASE WHEN b.year = ay.asof_year THEN b.points ELSE 0 END) AS season_points,\n       AVG(CASE WHEN b.year = ay.asof_year THEN b.positionOrder END) AS season_avg_finish,\n       SUM(CASE WHEN b.year = ay.asof_year AND b.positionOrder<=3 THEN 1 ELSE 0 END) AS season_podiums,\n       AVG(CASE WHEN b.year = ay.asof_year THEN b.grid END) AS season_avg_grid\nFROM base b\nLEFT JOIN as_of_year ay ON ay.driverId=b.driverId AND ay.date=b.date\nGROUP BY b.driverId, b.date"
+    },
+    {
+      "name": "circuit_history_driver",
+      "sql": "WITH as_of_circuit AS (\n  SELECT e.driverId, e.date,\n         ARG_MAX(ra.circuitId, res.date) AS asof_circuitId\n  FROM eval_table e\n  LEFT JOIN results res\n    ON res.driverId=e.driverId AND res.date < e.date\n  LEFT JOIN races ra\n    ON ra.raceId = res.raceId\n  GROUP BY e.driverId, e.date\n), hist AS (\n  SELECT e.driverId, e.date, ra.circuitId, res.positionOrder, res.grid, res.points\n  FROM eval_table e\n  LEFT JOIN as_of_circuit ac ON ac.driverId=e.driverId AND ac.date=e.date\n  LEFT JOIN results res ON res.driverId=e.driverId AND res.date < e.date\n  LEFT JOIN races ra ON ra.raceId = res.raceId\n  WHERE ra.circuitId = ac.asof_circuitId\n)\nSELECT driverId, date,\n       COUNT(*) AS circuit_races_career,\n       AVG(positionOrder) AS circuit_avg_finish,\n       MIN(positionOrder) AS circuit_best_finish,\n       AVG(grid) AS circuit_avg_grid,\n       SUM(points) AS circuit_points_sum\nFROM hist\nGROUP BY driverId, date"
+    },
+    {
+      "name": "driver_recent",
+      "sql": "WITH base AS (\n  SELECT e.driverId, e.date, r.date AS race_date, r.grid, r.positionOrder, r.points, r.statusId\n  FROM eval_table e\n  LEFT JOIN results r\n    ON r.driverId=e.driverId\n   AND r.date < e.date\n   AND r.date >= e.date - INTERVAL '730 days'\n)\nSELECT driverId, date,\n       COUNT(*) AS res_cnt_730d,\n       SUM(CASE WHEN race_date >= date - INTERVAL '30 days' THEN 1 ELSE 0 END) AS res_cnt_30d,\n       SUM(CASE WHEN race_date >= date - INTERVAL '90 days' THEN 1 ELSE 0 END) AS res_cnt_90d,\n       AVG(CASE WHEN race_date >= date - INTERVAL '90 days' THEN positionOrder END) AS avg_finish_90d,\n       AVG(CASE WHEN race_date >= date - INTERVAL '365 days' THEN positionOrder END) AS avg_finish_365d,\n       SUM(CASE WHEN race_date >= date - INTERVAL '365 days' THEN points ELSE 0 END) AS points_365d,\n       AVG(CASE WHEN race_date >= date - INTERVAL '365 days' THEN grid END) AS avg_grid_365d,\n       SUM(CASE WHEN race_date >= date - INTERVAL '365 days' AND positionOrder<=3 THEN 1 ELSE 0 END) AS podiums_365d,\n       SUM(CASE WHEN race_date >= date - INTERVAL '365 days' AND statusId<>1 THEN 1 ELSE 0 END) AS dnfs_365d\nFROM base\nGROUP BY driverId, date"
+    },
+    {
+      "name": "driver_qual_recent",
+      "sql": "WITH base AS (\n  SELECT e.driverId, e.date, q.date AS qual_date, q.position AS qpos\n  FROM eval_table e\n  LEFT JOIN qualifying q\n    ON q.driverId=e.driverId\n   AND q.date < e.date\n   AND q.date >= e.date - INTERVAL '730 days'\n)\nSELECT driverId, date,\n       COUNT(*) AS qual_cnt_730d,\n       SUM(CASE WHEN qual_date >= date-INTERVAL '90 days' THEN 1 ELSE 0 END) AS qual_cnt_90d,\n       AVG(CASE WHEN qual_date >= date-INTERVAL '90 days' THEN qpos END) AS avg_qpos_90d,\n       AVG(CASE WHEN qual_date >= date-INTERVAL '365 days' THEN qpos END) AS avg_qpos_365d,\n       MIN(CASE WHEN qual_date >= date-INTERVAL '365 days' THEN qpos END) AS best_qpos_365d,\n       SUM(CASE WHEN qual_date >= date-INTERVAL '365 days' AND qpos<=3 THEN 1 ELSE 0 END) AS top3_qual_365d\nFROM base\nGROUP BY driverId, date"
+    },
+    {
+      "name": "driver_static",
+      "sql": "SELECT e.driverId, e.date, DATE_DIFF('day', d.dob, e.date)/365.25 AS driver_age_years FROM eval_table e LEFT JOIN drivers d USING(driverId)"
+    },
+    {
+      "name": "last_event_features",
+      "sql": "WITH last_race AS (\n  SELECT e.driverId, e.date,\n         ARG_MAX(r.grid, r.date) AS last_grid,\n         ARG_MAX(r.positionOrder, r.date) AS last_finish,\n         ARG_MAX(r.points, r.date) AS last_points,\n         ARG_MAX(r.statusId, r.date) AS last_statusId,\n         MAX(r.date) AS last_race_date\n  FROM eval_table e\n  LEFT JOIN results r\n    ON r.driverId=e.driverId\n   AND r.date < e.date\n  GROUP BY e.driverId, e.date\n), last_qual AS (\n  SELECT e.driverId, e.date,\n         ARG_MAX(q.position, q.date) AS last_qpos,\n         MAX(q.date) AS last_qual_date\n  FROM eval_table e\n  LEFT JOIN qualifying q\n    ON q.driverId=e.driverId\n   AND q.date < e.date\n  GROUP BY e.driverId, e.date\n)\nSELECT e.driverId, e.date,\n       lr.last_grid, lr.last_finish, lr.last_points,\n       DATE_DIFF('day', lr.last_race_date, e.date) AS days_since_last_race,\n       CASE WHEN lr.last_statusId IS NULL THEN NULL WHEN lr.last_statusId <> 1 THEN 1 ELSE 0 END AS last_race_dnf,\n       lq.last_qpos,\n       DATE_DIFF('day', lq.last_qual_date, e.date) AS days_since_last_qual\nFROM eval_table e\nLEFT JOIN last_race lr ON lr.driverId=e.driverId AND lr.date=e.date\nLEFT JOIN last_qual lq ON lq.driverId=e.driverId AND lq.date=e.date"
+    },
+    {
+      "name": "current_constructor",
+      "sql": "SELECT e.driverId, e.date,\n       ARG_MAX(r.constructorId, r.date) AS cur_constructorId\nFROM eval_table e\nLEFT JOIN results r\n  ON r.driverId=e.driverId AND r.date < e.date\nGROUP BY e.driverId, e.date"
+    },
+    {
+      "name": "constructor_season_strength",
+      "sql": "WITH ctx AS (\n  SELECT e.driverId, e.date,\n         ARG_MAX(r.constructorId, r.date) AS cur_constructorId,\n         ARG_MAX(ra.year, r.date) AS asof_year\n  FROM eval_table e\n  LEFT JOIN results r\n    ON r.driverId=e.driverId AND r.date < e.date\n  LEFT JOIN races ra ON ra.raceId=r.raceId\n  GROUP BY e.driverId, e.date\n), cons_entries AS (\n  SELECT c.driverId, c.date, c.cur_constructorId, c.asof_year,\n         rr.driverId AS entry_driverId, rr.points, rr.positionOrder\n  FROM ctx c\n  LEFT JOIN results rr\n    ON rr.constructorId=c.cur_constructorId AND rr.date < c.date\n  LEFT JOIN races ra2 ON ra2.raceId=rr.raceId\n  WHERE ra2.year = c.asof_year\n)\nSELECT driverId, date,\n       cur_constructorId,\n       COUNT(*) AS cons_entries_season,\n       SUM(points) AS cons_points_season,\n       AVG(positionOrder) AS cons_avg_finish_season,\n       SUM(CASE WHEN positionOrder<=3 THEN 1 ELSE 0 END) AS cons_podium_entries_season\nFROM cons_entries\nGROUP BY driverId, date, cur_constructorId"
+    },
+    {
+      "name": "constructor_stability",
+      "sql": "WITH hist AS (\n  SELECT e.driverId, e.date, r.constructorId, r.date AS race_date\n  FROM eval_table e\n  LEFT JOIN results r\n    ON r.driverId=e.driverId AND r.date < e.date\n   AND r.date >= e.date - INTERVAL '365 days'\n), ranked AS (\n  SELECT driverId, date, constructorId, race_date,\n         ROW_NUMBER() OVER (PARTITION BY driverId, date ORDER BY race_date DESC) AS rn\n  FROM hist\n)\nSELECT h.driverId, h.date,\n       COUNT(DISTINCT h.constructorId) AS n_constructors_365d,\n       MAX(CASE WHEN r1.constructorId IS NOT NULL AND r2.constructorId IS NOT NULL AND r1.constructorId<>r2.constructorId THEN 1\n                WHEN r1.constructorId IS NOT NULL AND r2.constructorId IS NOT NULL THEN 0\n                ELSE NULL END) AS changed_constructor_last_race\nFROM hist h\nLEFT JOIN ranked r1 ON r1.driverId=h.driverId AND r1.date=h.date AND r1.rn=1\nLEFT JOIN ranked r2 ON r2.driverId=h.driverId AND r2.date=h.date AND r2.rn=2\nGROUP BY h.driverId, h.date"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "catboost",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.03,
+    "max_depth": 6,
+    "l2_leaf_reg": 8.0
+  }
+}

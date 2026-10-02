@@ -1,0 +1,53 @@
+{
+  "feature_queries": [
+    {
+      "name": "base",
+      "sql": "SELECT itemid, timestamp, visitorid, CAST(visitorid AS VARCHAR) AS visitorid_cat, EXTRACT(hour FROM timestamp) AS hour, EXTRACT(dow FROM timestamp) AS dow FROM eval_table"
+    },
+    {
+      "name": "item_views",
+      "sql": "SELECT e.itemid, e.timestamp,\n       COUNT(*) AS item_view_cnt_all,\n       SUM(CASE WHEN DATE_DIFF('second', v.timestamp, e.timestamp) <= 86400 THEN 1 ELSE 0 END) AS item_view_cnt_1d,\n       SUM(CASE WHEN DATE_DIFF('second', v.timestamp, e.timestamp) <= 3600 THEN 1 ELSE 0 END) AS item_view_cnt_1h,\n       MIN(DATE_DIFF('second', v.timestamp, e.timestamp)) AS item_secs_since_last_view\nFROM eval_table e\nLEFT JOIN View v\n  ON v.itemid = e.itemid\n AND v.timestamp < e.timestamp\nGROUP BY 1,2"
+    },
+    {
+      "name": "visitor_views",
+      "sql": "SELECT e.itemid, e.timestamp,\n       COUNT(*) AS visitor_view_cnt_all,\n       SUM(CASE WHEN DATE_DIFF('second', v.timestamp, e.timestamp) <= 86400 THEN 1 ELSE 0 END) AS visitor_view_cnt_1d,\n       SUM(CASE WHEN DATE_DIFF('second', v.timestamp, e.timestamp) <= 3600 THEN 1 ELSE 0 END) AS visitor_view_cnt_1h,\n       COUNT(DISTINCT v.itemid) AS visitor_distinct_items_all,\n       COUNT(DISTINCT CASE WHEN DATE_DIFF('second', v.timestamp, e.timestamp) <= 86400 THEN v.itemid ELSE NULL END) AS visitor_distinct_items_1d,\n       MIN(DATE_DIFF('second', v.timestamp, e.timestamp)) AS visitor_secs_since_last_view\nFROM eval_table e\nLEFT JOIN View v\n  ON v.visitorid = e.visitorid\n AND v.timestamp < e.timestamp\nGROUP BY 1,2"
+    },
+    {
+      "name": "pair_history",
+      "sql": "SELECT e.itemid, e.timestamp,\n       COUNT(*) AS pair_view_cnt_all,\n       SUM(CASE WHEN DATE_DIFF('second', v.timestamp, e.timestamp) <= 86400 THEN 1 ELSE 0 END) AS pair_view_cnt_1d,\n       SUM(CASE WHEN DATE_DIFF('second', v.timestamp, e.timestamp) <= 3600 THEN 1 ELSE 0 END) AS pair_view_cnt_1h,\n       MIN(DATE_DIFF('second', v.timestamp, e.timestamp)) AS pair_secs_since_last_view\nFROM eval_table e\nLEFT JOIN View v\n  ON v.visitorid = e.visitorid\n AND v.itemid = e.itemid\n AND v.timestamp < e.timestamp\nGROUP BY 1,2"
+    },
+    {
+      "name": "interactions",
+      "sql": "WITH iv AS (\n  SELECT e.itemid, e.timestamp,\n         COUNT(*) AS item_view_cnt_all,\n         SUM(CASE WHEN DATE_DIFF('second', v.timestamp, e.timestamp) <= 86400 THEN 1 ELSE 0 END) AS item_view_cnt_1d,\n         SUM(CASE WHEN DATE_DIFF('second', v.timestamp, e.timestamp) <= 3600 THEN 1 ELSE 0 END) AS item_view_cnt_1h,\n         MIN(DATE_DIFF('second', v.timestamp, e.timestamp)) AS item_secs_since_last_view\n  FROM eval_table e\n  LEFT JOIN View v ON v.itemid=e.itemid AND v.timestamp < e.timestamp\n  GROUP BY 1,2\n), vv AS (\n  SELECT e.itemid, e.timestamp,\n         COUNT(*) AS visitor_view_cnt_all,\n         SUM(CASE WHEN DATE_DIFF('second', v.timestamp, e.timestamp) <= 86400 THEN 1 ELSE 0 END) AS visitor_view_cnt_1d,\n         COUNT(DISTINCT CASE WHEN DATE_DIFF('second', v.timestamp, e.timestamp) <= 86400 THEN v.itemid ELSE NULL END) AS visitor_distinct_items_1d,\n         MIN(DATE_DIFF('second', v.timestamp, e.timestamp)) AS visitor_secs_since_last_view\n  FROM eval_table e\n  LEFT JOIN View v ON v.visitorid=e.visitorid AND v.timestamp < e.timestamp\n  GROUP BY 1,2\n), ph AS (\n  SELECT e.itemid, e.timestamp,\n         COUNT(*) AS pair_view_cnt_all,\n         SUM(CASE WHEN DATE_DIFF('second', v.timestamp, e.timestamp) <= 86400 THEN 1 ELSE 0 END) AS pair_view_cnt_1d,\n         MIN(DATE_DIFF('second', v.timestamp, e.timestamp)) AS pair_secs_since_last_view\n  FROM eval_table e\n  LEFT JOIN View v ON v.visitorid=e.visitorid AND v.itemid=e.itemid AND v.timestamp < e.timestamp\n  GROUP BY 1,2\n)\nSELECT e.itemid, e.timestamp,\n       (ph.pair_view_cnt_1d * 1.0) / (vv.visitor_view_cnt_1d + 1.0) AS pair_share_visitor_1d,\n       (ph.pair_view_cnt_all * 1.0) / (iv.item_view_cnt_all + 1.0) AS pair_share_item_all,\n       (iv.item_view_cnt_1h * 1.0) / (iv.item_view_cnt_1d + 1.0) AS item_trend_1h_over_1d,\n       (vv.visitor_distinct_items_1d * 1.0) / (vv.visitor_view_cnt_1d + 1.0) AS visitor_repeat_rate_1d,\n       LN(1.0 + COALESCE(iv.item_view_cnt_all,0)) AS log_item_view_cnt_all,\n       LN(1.0 + COALESCE(vv.visitor_view_cnt_all,0)) AS log_visitor_view_cnt_all,\n       LN(1.0 + COALESCE(ph.pair_view_cnt_all,0)) AS log_pair_view_cnt_all,\n       LN(1.0 + COALESCE(iv.item_secs_since_last_view, 99999999)) AS log_item_recency,\n       LN(1.0 + COALESCE(vv.visitor_secs_since_last_view, 99999999)) AS log_visitor_recency,\n       LN(1.0 + COALESCE(ph.pair_secs_since_last_view, 99999999)) AS log_pair_recency\nFROM eval_table e\nLEFT JOIN iv ON iv.itemid=e.itemid AND iv.timestamp=e.timestamp\nLEFT JOIN vv ON vv.itemid=e.itemid AND vv.timestamp=e.timestamp\nLEFT JOIN ph ON ph.itemid=e.itemid AND ph.timestamp=e.timestamp"
+    },
+    {
+      "name": "item_category",
+      "sql": "WITH latest_cat AS (\n  SELECT e.itemid, e.timestamp, ic.category,\n         ROW_NUMBER() OVER (PARTITION BY e.itemid, e.timestamp ORDER BY ic.timestamp DESC) AS rn\n  FROM eval_table e\n  LEFT JOIN ItemCategory ic\n    ON ic.itemid = e.itemid\n   AND ic.timestamp < e.timestamp\n)\nSELECT itemid, timestamp, category\nFROM latest_cat\nWHERE rn = 1"
+    },
+    {
+      "name": "category_popularity",
+      "sql": "WITH latest_cat AS (\n  SELECT e.itemid, e.timestamp, ic.category,\n         ROW_NUMBER() OVER (PARTITION BY e.itemid, e.timestamp ORDER BY ic.timestamp DESC) AS rn\n  FROM eval_table e\n  LEFT JOIN ItemCategory ic\n    ON ic.itemid = e.itemid\n   AND ic.timestamp < e.timestamp\n), eval_cat AS (\n  SELECT itemid, timestamp, category\n  FROM latest_cat\n  WHERE rn=1\n)\nSELECT e.itemid, e.timestamp,\n       COUNT(v.timestamp) AS cat_view_cnt_all,\n       SUM(CASE WHEN DATE_DIFF('second', v.timestamp, e.timestamp) <= 86400 THEN 1 ELSE 0 END) AS cat_view_cnt_1d,\n       SUM(CASE WHEN DATE_DIFF('second', v.timestamp, e.timestamp) <= 3600 THEN 1 ELSE 0 END) AS cat_view_cnt_1h,\n       COUNT(DISTINCT v.itemid) AS cat_distinct_items_all,\n       COUNT(DISTINCT CASE WHEN DATE_DIFF('second', v.timestamp, e.timestamp) <= 86400 THEN v.itemid ELSE NULL END) AS cat_distinct_items_1d\nFROM eval_table e\nJOIN eval_cat ec\n  ON ec.itemid=e.itemid AND ec.timestamp=e.timestamp\nLEFT JOIN ItemCategory ic2\n  ON ic2.category = ec.category\n AND ic2.timestamp < e.timestamp\nLEFT JOIN View v\n  ON v.itemid = ic2.itemid\n AND v.timestamp < e.timestamp\nGROUP BY 1,2"
+    },
+    {
+      "name": "availability",
+      "sql": "WITH latest_av AS (\n  SELECT e.itemid, e.timestamp, ia.available,\n         ROW_NUMBER() OVER (PARTITION BY e.itemid, e.timestamp ORDER BY ia.timestamp DESC) AS rn\n  FROM eval_table e\n  LEFT JOIN ItemAvailability ia\n    ON ia.itemid = e.itemid\n   AND ia.timestamp < e.timestamp\n)\nSELECT itemid, timestamp, available\nFROM latest_av\nWHERE rn = 1"
+    },
+    {
+      "name": "availability_history",
+      "sql": "SELECT e.itemid, e.timestamp,\n       COUNT(*) AS avail_change_cnt_all,\n       SUM(CASE WHEN DATE_DIFF('second', ia.timestamp, e.timestamp) <= 86400 THEN 1 ELSE 0 END) AS avail_change_cnt_1d,\n       MIN(DATE_DIFF('second', ia.timestamp, e.timestamp)) AS secs_since_avail_change\nFROM eval_table e\nLEFT JOIN ItemAvailability ia\n  ON ia.itemid = e.itemid\n AND ia.timestamp < e.timestamp\nGROUP BY 1,2"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "catboost",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.08,
+    "max_depth": 7,
+    "l2_leaf_reg": 3.0,
+    "categorical_features": [
+      "item_category__category",
+      "availability__available",
+      "base__visitorid_cat"
+    ]
+  }
+}

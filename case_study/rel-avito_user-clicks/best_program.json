@@ -1,0 +1,55 @@
+{
+  "feature_queries": [
+    {
+      "name": "base",
+      "sql": "SELECT e.UserID, e.timestamp, EXTRACT('dow' FROM e.timestamp) AS dow FROM eval_table e"
+    },
+    {
+      "name": "user_info",
+      "sql": "SELECT e.UserID, e.timestamp, ui.UserAgentID, ui.UserAgentOSID, ui.UserDeviceID, ui.UserAgentFamilyID FROM eval_table e LEFT JOIN UserInfo ui USING (UserID)"
+    },
+    {
+      "name": "visit_agg",
+      "sql": "SELECT\n  e.UserID,\n  e.timestamp,\n  COUNT(v.ViewDate) AS visits_30d,\n  COUNT(v.ViewDate) FILTER (WHERE v.ViewDate >= e.timestamp - INTERVAL '4 days') AS visits_4d,\n  COUNT(v.ViewDate) FILTER (WHERE v.ViewDate >= e.timestamp - INTERVAL '1 day') AS visits_1d,\n  COUNT(DISTINCT v.AdID) AS distinct_ads_30d,\n  COUNT(DISTINCT v.IPID) AS distinct_ip_30d,\n  MIN(epoch(e.timestamp - v.ViewDate)/3600.0) AS hours_since_last_visit\nFROM eval_table e\nLEFT JOIN VisitStream v\n  ON v.UserID = e.UserID\n AND v.ViewDate < e.timestamp\n AND v.ViewDate >= e.timestamp - INTERVAL '30 days'\nGROUP BY 1,2"
+    },
+    {
+      "name": "search_info_agg",
+      "sql": "SELECT\n  e.UserID,\n  e.timestamp,\n  COUNT(si.SearchDate) AS searches_30d,\n  COUNT(si.SearchDate) FILTER (WHERE si.SearchDate >= e.timestamp - INTERVAL '4 days') AS searches_4d,\n  AVG(si.IsUserLoggedOn) AS avg_loggedon_30d,\n  COUNT(DISTINCT si.LocationID) AS distinct_loc_30d,\n  COUNT(DISTINCT si.CategoryID) AS distinct_cat_30d,\n  MIN(epoch(e.timestamp - si.SearchDate)/3600.0) AS hours_since_last_search\nFROM eval_table e\nLEFT JOIN SearchInfo si\n  ON si.UserID = e.UserID\n AND si.SearchDate < e.timestamp\n AND si.SearchDate >= e.timestamp - INTERVAL '30 days'\nGROUP BY 1,2"
+    },
+    {
+      "name": "search_click_agg",
+      "sql": "WITH sids AS (\n  SELECT e.UserID, e.timestamp, si.SearchID\n  FROM eval_table e\n  LEFT JOIN SearchInfo si\n    ON si.UserID = e.UserID\n   AND si.SearchDate < e.timestamp\n   AND si.SearchDate >= e.timestamp - INTERVAL '30 days'\n)\nSELECT\n  s.UserID,\n  s.timestamp,\n  COUNT(st.SearchDate) AS impressions_30d,\n  SUM(st.IsClick) AS clicks_30d,\n  SUM(st.IsClick) FILTER (WHERE st.SearchDate >= s.timestamp - INTERVAL '4 days') AS clicks_4d,\n  AVG(st.IsClick) AS ctr_30d,\n  AVG(st.Position) AS avg_pos_30d,\n  AVG(st.HistCTR) AS avg_histctr_30d,\n  MIN(st.Position) FILTER (WHERE st.IsClick = 1) AS best_click_pos_30d\nFROM sids s\nLEFT JOIN SearchStream st\n  ON st.SearchID = s.SearchID\n AND st.SearchDate < s.timestamp\n AND st.SearchDate >= s.timestamp - INTERVAL '30 days'\nGROUP BY 1,2"
+    },
+    {
+      "name": "search_click_flags",
+      "sql": "WITH sids AS (\n  SELECT e.UserID, e.timestamp, si.SearchID\n  FROM eval_table e\n  LEFT JOIN SearchInfo si\n    ON si.UserID = e.UserID\n   AND si.SearchDate < e.timestamp\n   AND si.SearchDate >= e.timestamp - INTERVAL '30 days'\n), agg AS (\n  SELECT\n    s.UserID,\n    s.timestamp,\n    COUNT(st.SearchDate) AS impressions_30d,\n    SUM(st.IsClick) AS clicks_30d\n  FROM sids s\n  LEFT JOIN SearchStream st\n    ON st.SearchID = s.SearchID\n   AND st.SearchDate < s.timestamp\n   AND st.SearchDate >= s.timestamp - INTERVAL '30 days'\n  GROUP BY 1,2\n)\nSELECT\n  UserID,\n  timestamp,\n  (impressions_30d > 0)::INT AS has_impressions_30d,\n  (clicks_30d > 0)::INT AS has_clicks_30d,\n  LOG(1 + COALESCE(impressions_30d,0)) AS log_impressions_30d,\n  LOG(1 + COALESCE(clicks_30d,0)) AS log_clicks_30d\nFROM agg"
+    },
+    {
+      "name": "phone_req_agg",
+      "sql": "SELECT\n  e.UserID,\n  e.timestamp,\n  COUNT(p.PhoneRequestDate) AS phone_reqs_30d,\n  COUNT(p.PhoneRequestDate) FILTER (WHERE p.PhoneRequestDate >= e.timestamp - INTERVAL '4 days') AS phone_reqs_4d,\n  MIN(epoch(e.timestamp - p.PhoneRequestDate)/3600.0) AS hours_since_last_phone_req\nFROM eval_table e\nLEFT JOIN PhoneRequestsStream p\n  ON p.UserID = e.UserID\n AND p.PhoneRequestDate < e.timestamp\n AND p.PhoneRequestDate >= e.timestamp - INTERVAL '30 days'\nGROUP BY 1,2"
+    },
+    {
+      "name": "phone_adsinfo_agg",
+      "sql": "WITH pr AS (\n  SELECT\n    e.UserID,\n    e.timestamp,\n    p.AdID\n  FROM eval_table e\n  LEFT JOIN PhoneRequestsStream p\n    ON p.UserID = e.UserID\n   AND p.PhoneRequestDate < e.timestamp\n   AND p.PhoneRequestDate >= e.timestamp - INTERVAL '30 days'\n)\nSELECT\n  pr.UserID,\n  pr.timestamp,\n  COUNT(pr.AdID) AS phone_ads_30d,\n  COUNT(DISTINCT ai.CategoryID) AS phone_distinct_cat_30d,\n  AVG(LOG(1 + ai.Price)) AS phone_avg_logprice_30d,\n  MIN(LOG(1 + ai.Price)) AS phone_min_logprice_30d,\n  MAX(LOG(1 + ai.Price)) AS phone_max_logprice_30d\nFROM pr\nLEFT JOIN AdsInfo ai ON ai.AdID = pr.AdID\nGROUP BY 1,2"
+    },
+    {
+      "name": "ratios_flags_v2",
+      "sql": "WITH v AS (\n  SELECT\n    e.UserID,\n    e.timestamp,\n    COUNT(vs.ViewDate) AS visits_30d,\n    COUNT(vs.ViewDate) FILTER (WHERE vs.ViewDate >= e.timestamp - INTERVAL '4 days') AS visits_4d\n  FROM eval_table e\n  LEFT JOIN VisitStream vs\n    ON vs.UserID = e.UserID\n   AND vs.ViewDate < e.timestamp\n   AND vs.ViewDate >= e.timestamp - INTERVAL '30 days'\n  GROUP BY 1,2\n), s AS (\n  SELECT\n    e.UserID,\n    e.timestamp,\n    COUNT(si.SearchDate) AS searches_30d\n  FROM eval_table e\n  LEFT JOIN SearchInfo si\n    ON si.UserID = e.UserID\n   AND si.SearchDate < e.timestamp\n   AND si.SearchDate >= e.timestamp - INTERVAL '30 days'\n  GROUP BY 1,2\n), c AS (\n  WITH sids AS (\n    SELECT e.UserID, e.timestamp, si.SearchID\n    FROM eval_table e\n    LEFT JOIN SearchInfo si\n      ON si.UserID = e.UserID\n     AND si.SearchDate < e.timestamp\n     AND si.SearchDate >= e.timestamp - INTERVAL '30 days'\n  )\n  SELECT\n    sids.UserID,\n    sids.timestamp,\n    COUNT(st.SearchDate) AS impressions_30d,\n    SUM(st.IsClick) AS clicks_30d\n  FROM sids\n  LEFT JOIN SearchStream st\n    ON st.SearchID = sids.SearchID\n   AND st.SearchDate < sids.timestamp\n   AND st.SearchDate >= sids.timestamp - INTERVAL '30 days'\n  GROUP BY 1,2\n), p AS (\n  SELECT\n    e.UserID,\n    e.timestamp,\n    COUNT(pr.PhoneRequestDate) AS phone_30d\n  FROM eval_table e\n  LEFT JOIN PhoneRequestsStream pr\n    ON pr.UserID = e.UserID\n   AND pr.PhoneRequestDate < e.timestamp\n   AND pr.PhoneRequestDate >= e.timestamp - INTERVAL '30 days'\n  GROUP BY 1,2\n)\nSELECT\n  e.UserID,\n  e.timestamp,\n  (COALESCE(v.visits_30d,0) > 0)::INT AS has_visits_30d,\n  (COALESCE(s.searches_30d,0) > 0)::INT AS has_searches_30d,\n  (COALESCE(c.clicks_30d,0) > 0)::INT AS has_clicks_30d,\n  (COALESCE(p.phone_30d,0) > 0)::INT AS has_phone_30d,\n  v.visits_4d * 1.0 / NULLIF(v.visits_30d, 0) AS frac_visits_4d_of_30d,\n  c.clicks_30d * 1.0 / NULLIF(c.impressions_30d, 0) AS ctr_from_counts_30d,\n  p.phone_30d * 1.0 / NULLIF(v.visits_30d, 0) AS phone_per_visit_30d\nFROM eval_table e\nLEFT JOIN v USING (UserID, timestamp)\nLEFT JOIN s USING (UserID, timestamp)\nLEFT JOIN c USING (UserID, timestamp)\nLEFT JOIN p USING (UserID, timestamp)"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "catboost",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.05,
+    "max_depth": 8,
+    "l2_leaf_reg": 5.0,
+    "categorical_features": [
+      "user_info__UserAgentID",
+      "user_info__UserAgentOSID",
+      "user_info__UserDeviceID",
+      "user_info__UserAgentFamilyID",
+      "base__dow"
+    ]
+  }
+}

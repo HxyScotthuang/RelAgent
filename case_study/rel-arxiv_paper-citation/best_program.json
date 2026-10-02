@@ -1,0 +1,56 @@
+{
+  "feature_queries": [
+    {
+      "name": "paper_base5",
+      "sql": "SELECT\n  t.Paper_ID,\n  t.date,\n  DATE_DIFF('day', p.Submission_Date, t.date) AS paper_age_days,\n  EXTRACT(year FROM t.date) AS asof_year,\n  EXTRACT(month FROM t.date) AS asof_month,\n  p.Primary_Category_ID AS primary_cat_id,\n  LENGTH(COALESCE(p.Title,'')) AS title_len,\n  LENGTH(COALESCE(p.Abstract,'')) AS abstract_len\nFROM eval_table t\nLEFT JOIN papers p ON p.Paper_ID = t.Paper_ID"
+    },
+    {
+      "name": "citation_hist5",
+      "sql": "WITH base AS (\n  SELECT\n    t.Paper_ID, t.date,\n    COUNT(*) FILTER (WHERE c.Submission_Date < t.date) AS total_cites_before,\n    COUNT(*) FILTER (WHERE c.Submission_Date >= t.date - INTERVAL '30 days' AND c.Submission_Date < t.date) AS cites_30d,\n    COUNT(*) FILTER (WHERE c.Submission_Date >= t.date - INTERVAL '180 days' AND c.Submission_Date < t.date) AS cites_180d,\n    COUNT(*) FILTER (WHERE c.Submission_Date >= t.date - INTERVAL '365 days' AND c.Submission_Date < t.date) AS cites_365d,\n    MAX(DATE_DIFF('day', c.Submission_Date, t.date)) FILTER (WHERE c.Submission_Date < t.date) AS days_since_first_cite,\n    MIN(DATE_DIFF('day', c.Submission_Date, t.date)) FILTER (WHERE c.Submission_Date < t.date) AS days_since_most_recent_cite\n  FROM eval_table t\n  LEFT JOIN citations c\n    ON c.References_Paper_ID = t.Paper_ID\n  GROUP BY t.Paper_ID, t.date\n)\nSELECT\n  b.*,\n  CASE WHEN b.total_cites_before>0 THEN 1 ELSE 0 END AS has_any_cite_before,\n  COALESCE(CAST(b.cites_180d AS DOUBLE) / NULLIF(CAST(b.total_cites_before AS DOUBLE),0),0) AS frac_cites_last_180d,\n  COALESCE(CAST(b.cites_30d AS DOUBLE) / NULLIF(CAST(b.cites_180d AS DOUBLE),0),0) AS frac_cites_30_over_180\nFROM base b"
+    },
+    {
+      "name": "citation_norm5",
+      "sql": "WITH age AS (\n  SELECT t.Paper_ID, t.date, DATE_DIFF('day', p.Submission_Date, t.date) AS paper_age_days\n  FROM eval_table t\n  LEFT JOIN papers p ON p.Paper_ID=t.Paper_ID\n), cites AS (\n  SELECT\n    t.Paper_ID, t.date,\n    COUNT(*) FILTER (WHERE c.Submission_Date < t.date) AS total_cites_before,\n    COUNT(*) FILTER (WHERE c.Submission_Date >= t.date - INTERVAL '180 days' AND c.Submission_Date < t.date) AS cites_180d\n  FROM eval_table t\n  LEFT JOIN citations c\n    ON c.References_Paper_ID=t.Paper_ID\n  GROUP BY t.Paper_ID,t.date\n)\nSELECT\n  a.Paper_ID, a.date,\n  COALESCE(CAST(c.total_cites_before AS DOUBLE) / (a.paper_age_days + 1),0) AS cites_per_day_life,\n  COALESCE(CAST(c.cites_180d AS DOUBLE) / LEAST(a.paper_age_days + 1,180),0) AS cites_per_day_last180cap\nFROM age a\nLEFT JOIN cites c\n  ON c.Paper_ID=a.Paper_ID AND c.date=a.date"
+    },
+    {
+      "name": "authors_agg39",
+      "sql": "WITH author_hist AS (\n  SELECT\n    t.Paper_ID, t.date,\n    pa.Author_ID,\n    COUNT(DISTINCT pa2.Paper_ID) AS author_prev_papers,\n    COUNT(DISTINCT c2.Paper_ID) AS author_prev_citations\n  FROM eval_table t\n  LEFT JOIN paperAuthors pa\n    ON pa.Paper_ID = t.Paper_ID\n   AND pa.Submission_Date < t.date\n  LEFT JOIN paperAuthors pa2\n    ON pa2.Author_ID = pa.Author_ID\n   AND pa2.Submission_Date < t.date\n  LEFT JOIN citations c2\n    ON c2.References_Paper_ID = pa2.Paper_ID\n   AND c2.Submission_Date < t.date\n  GROUP BY t.Paper_ID, t.date, pa.Author_ID\n)\nSELECT\n  Paper_ID,\n  date,\n  COALESCE(COUNT(DISTINCT Author_ID),0) AS n_authors,\n  COALESCE(AVG(author_prev_papers),0) AS avg_author_prev_papers,\n  COALESCE(AVG(author_prev_citations),0) AS avg_author_prev_citations\nFROM author_hist\nGROUP BY Paper_ID, date"
+    },
+    {
+      "name": "author_velocity9",
+      "sql": "WITH paper_auth AS (\n  SELECT\n    t.Paper_ID, t.date,\n    pa.Author_ID\n  FROM eval_table t\n  JOIN paperAuthors pa\n    ON pa.Paper_ID=t.Paper_ID\n   AND pa.Submission_Date < t.date\n), author_papers AS (\n  SELECT\n    pa0.Paper_ID, pa0.date, pa0.Author_ID,\n    pa1.Paper_ID AS author_paper_id\n  FROM paper_auth pa0\n  JOIN paperAuthors pa1\n    ON pa1.Author_ID = pa0.Author_ID\n   AND pa1.Submission_Date < pa0.date\n), author_cites AS (\n  SELECT\n    ap.Paper_ID, ap.date, ap.Author_ID,\n    COUNT(*) FILTER (WHERE c.Submission_Date >= ap.date - INTERVAL '30 days' AND c.Submission_Date < ap.date) AS author_cites_30d,\n    COUNT(*) FILTER (WHERE c.Submission_Date >= ap.date - INTERVAL '180 days' AND c.Submission_Date < ap.date) AS author_cites_180d\n  FROM author_papers ap\n  LEFT JOIN citations c\n    ON c.References_Paper_ID = ap.author_paper_id\n   AND c.Submission_Date < ap.date\n  GROUP BY ap.Paper_ID, ap.date, ap.Author_ID\n)\nSELECT\n  t.Paper_ID, t.date,\n  COALESCE(AVG(author_cites_30d),0) AS avg_author_cites_30d,\n  COALESCE(MAX(author_cites_30d),0) AS max_author_cites_30d,\n  COALESCE(AVG(author_cites_180d),0) AS avg_author_cites_180d,\n  COALESCE(MAX(author_cites_180d),0) AS max_author_cites_180d\nFROM eval_table t\nLEFT JOIN author_cites ac\n  ON ac.Paper_ID=t.Paper_ID AND ac.date=t.date\nGROUP BY t.Paper_ID, t.date"
+    },
+    {
+      "name": "out_refs15",
+      "sql": "SELECT\n  t.Paper_ID,\n  t.date,\n  COUNT(*) FILTER (WHERE c.Submission_Date < t.date) AS n_refs_made_before,\n  COUNT(DISTINCT c.References_Paper_ID) FILTER (WHERE c.Submission_Date < t.date) AS n_unique_refs_made_before,\n  COUNT(*) FILTER (WHERE c.Submission_Date >= t.date - INTERVAL '30 days' AND c.Submission_Date < t.date) AS n_refs_made_30d,\n  COUNT(*) FILTER (WHERE c.Submission_Date >= t.date - INTERVAL '180 days' AND c.Submission_Date < t.date) AS n_refs_made_180d\nFROM eval_table t\nLEFT JOIN citations c\n  ON c.Paper_ID = t.Paper_ID\nGROUP BY t.Paper_ID, t.date"
+    },
+    {
+      "name": "reference_quality5",
+      "sql": "WITH refs AS (\n  SELECT\n    t.Paper_ID, t.date,\n    c.References_Paper_ID AS ref_paper_id\n  FROM eval_table t\n  JOIN citations c\n    ON c.Paper_ID = t.Paper_ID\n   AND c.Submission_Date < t.date\n), ref_citedness AS (\n  SELECT\n    r.Paper_ID, r.date, r.ref_paper_id,\n    COUNT(*) AS ref_incoming_cites_before\n  FROM refs r\n  JOIN citations ci\n    ON ci.References_Paper_ID = r.ref_paper_id\n   AND ci.Submission_Date < r.date\n  GROUP BY r.Paper_ID, r.date, r.ref_paper_id\n)\nSELECT\n  t.Paper_ID,\n  t.date,\n  COALESCE(AVG(ref_incoming_cites_before),0) AS avg_ref_cites_before,\n  COALESCE(MAX(ref_incoming_cites_before),0) AS max_ref_cites_before,\n  COALESCE(SUM(CASE WHEN ref_incoming_cites_before>=10 THEN 1 ELSE 0 END),0) AS n_refs_to_10p_cited\nFROM eval_table t\nLEFT JOIN ref_citedness rc\n  ON rc.Paper_ID=t.Paper_ID AND rc.date=t.date\nGROUP BY t.Paper_ID, t.date"
+    },
+    {
+      "name": "ref_velocity41",
+      "sql": "WITH refs AS (\n  SELECT\n    t.Paper_ID, t.date,\n    c.References_Paper_ID AS ref_paper_id\n  FROM eval_table t\n  JOIN citations c\n    ON c.Paper_ID=t.Paper_ID\n   AND c.Submission_Date < t.date\n), ref_vel AS (\n  SELECT\n    r.Paper_ID, r.date, r.ref_paper_id,\n    COUNT(*) FILTER (WHERE ci.Submission_Date >= r.date - INTERVAL '30 days' AND ci.Submission_Date < r.date) AS ref_cites_30d,\n    COUNT(*) FILTER (WHERE ci.Submission_Date >= r.date - INTERVAL '180 days' AND ci.Submission_Date < r.date) AS ref_cites_180d\n  FROM refs r\n  LEFT JOIN citations ci\n    ON ci.References_Paper_ID = r.ref_paper_id\n   AND ci.Submission_Date < r.date\n  GROUP BY r.Paper_ID, r.date, r.ref_paper_id\n)\nSELECT\n  t.Paper_ID, t.date,\n  COALESCE(AVG(ref_cites_30d),0) AS avg_ref_cites_30d,\n  COALESCE(AVG(ref_cites_180d),0) AS avg_ref_cites_180d\nFROM eval_table t\nLEFT JOIN ref_vel rv\n  ON rv.Paper_ID=t.Paper_ID AND rv.date=t.date\nGROUP BY t.Paper_ID, t.date"
+    },
+    {
+      "name": "cat_cite_intensity5",
+      "sql": "WITH base AS (\n  SELECT t.Paper_ID, t.date, p.Primary_Category_ID AS cat_id\n  FROM eval_table t\n  LEFT JOIN papers p ON p.Paper_ID=t.Paper_ID\n), cat_papers AS (\n  SELECT\n    b.Paper_ID, b.date, b.cat_id,\n    p2.Paper_ID AS cat_paper_id\n  FROM base b\n  JOIN papers p2\n    ON p2.Primary_Category_ID=b.cat_id\n   AND p2.Submission_Date < b.date\n), cat_incoming AS (\n  SELECT\n    cp.Paper_ID, cp.date, cp.cat_id,\n    COUNT(*) AS cat_incoming_cites_before\n  FROM cat_papers cp\n  JOIN citations c\n    ON c.References_Paper_ID = cp.cat_paper_id\n   AND c.Submission_Date < cp.date\n  GROUP BY cp.Paper_ID, cp.date, cp.cat_id\n)\nSELECT\n  b.Paper_ID, b.date,\n  COALESCE(ci.cat_incoming_cites_before,0) AS cat_incoming_cites_before,\n  (SELECT COUNT(*) FROM papers p3\n     WHERE p3.Primary_Category_ID=b.cat_id\n       AND p3.Submission_Date < b.date) AS cat_prev_papers,\n  COALESCE(CAST(ci.cat_incoming_cites_before AS DOUBLE) / NULLIF((SELECT COUNT(*) FROM papers p3\n     WHERE p3.Primary_Category_ID=b.cat_id\n       AND p3.Submission_Date < b.date),0),0) AS cat_cites_per_prior_paper\nFROM base b\nLEFT JOIN cat_incoming ci\n  ON ci.Paper_ID=b.Paper_ID AND ci.date=b.date"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "dart",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.04,
+    "max_depth": 7,
+    "subsample": 0.75,
+    "colsample_bytree": 0.75,
+    "min_child_samples": 30,
+    "lambda_l2": 2.0,
+    "objective": "regression_l2",
+    "categorical_features": [
+      "paper_base5__primary_cat_id",
+      "paper_base5__asof_month"
+    ]
+  }
+}

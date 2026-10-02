@@ -1,0 +1,40 @@
+{
+  "feature_queries": [
+    {
+      "name": "author_static",
+      "sql": "SELECT\n  e.Author_ID,\n  e.date,\n  LENGTH(a.Name) AS name_len\nFROM eval_table e\nLEFT JOIN authors a ON a.Author_ID = e.Author_ID"
+    },
+    {
+      "name": "calendar",
+      "sql": "SELECT\n  Author_ID,\n  date,\n  EXTRACT(year FROM date) AS year,\n  EXTRACT(month FROM date) AS month,\n  EXTRACT(doy FROM date) AS day_of_year\nFROM eval_table"
+    },
+    {
+      "name": "pub_history_dense",
+      "sql": "WITH base AS (SELECT Author_ID, date FROM eval_table)\nSELECT\n  b.Author_ID,\n  b.date,\n  COUNT(DISTINCT pa.Paper_ID) AS pubs_all_time,\n  COUNT(DISTINCT CASE WHEN pa.Submission_Date >= b.date - INTERVAL '30 days' THEN pa.Paper_ID END) AS pubs_30d,\n  COUNT(DISTINCT CASE WHEN pa.Submission_Date >= b.date - INTERVAL '90 days' THEN pa.Paper_ID END) AS pubs_90d,\n  COUNT(DISTINCT CASE WHEN pa.Submission_Date >= b.date - INTERVAL '180 days' THEN pa.Paper_ID END) AS pubs_180d,\n  COUNT(DISTINCT CASE WHEN pa.Submission_Date >= b.date - INTERVAL '365 days' THEN pa.Paper_ID END) AS pubs_365d,\n  DATE_DIFF('day', MAX(pa.Submission_Date), b.date) AS days_since_last_pub\nFROM base b\nLEFT JOIN paperAuthors pa\n  ON pa.Author_ID=b.Author_ID\n AND pa.Submission_Date < b.date\nGROUP BY 1,2"
+    },
+    {
+      "name": "coauthor_dense",
+      "sql": "WITH base AS (SELECT Author_ID, date FROM eval_table), my_papers AS (\n  SELECT b.Author_ID, b.date, pa.Paper_ID\n  FROM base b\n  LEFT JOIN paperAuthors pa\n    ON pa.Author_ID=b.Author_ID\n   AND pa.Submission_Date < b.date\n), coauthors AS (\n  SELECT mp.Author_ID, mp.date, pa2.Author_ID AS coauthor_id\n  FROM my_papers mp\n  JOIN paperAuthors pa2 ON pa2.Paper_ID = mp.Paper_ID\n)\nSELECT\n  b.Author_ID,\n  b.date,\n  COALESCE(COUNT(DISTINCT co.coauthor_id) - 1, 0) AS coauthor_count_all_time\nFROM base b\nLEFT JOIN coauthors co ON co.Author_ID=b.Author_ID AND co.date=b.date\nGROUP BY 1,2"
+    },
+    {
+      "name": "citation_features",
+      "sql": "WITH base AS (\n  SELECT e.Author_ID, e.date\n  FROM eval_table e\n), my_papers AS (\n  SELECT\n    b.Author_ID,\n    b.date,\n    pa.Paper_ID\n  FROM base b\n  LEFT JOIN paperAuthors pa\n    ON pa.Author_ID = b.Author_ID\n   AND pa.Submission_Date < b.date\n), refs AS (\n  SELECT\n    mp.Author_ID,\n    mp.date,\n    c.References_Paper_ID\n  FROM my_papers mp\n  JOIN citations c\n    ON c.Paper_ID = mp.Paper_ID\n   AND c.Submission_Date < mp.date\n)\nSELECT\n  Author_ID,\n  date,\n  COALESCE(COUNT(*),0) AS n_references_made\nFROM refs\nGROUP BY 1,2"
+    },
+    {
+      "name": "y_lags2",
+      "sql": "WITH base AS (SELECT Author_ID, date FROM eval_table), joined AS (\n  SELECT\n    b.Author_ID,\n    b.date,\n    t.date AS hist_date,\n    t.publication_count\n  FROM base b\n  LEFT JOIN train_table t\n    ON t.Author_ID=b.Author_ID\n   AND t.date < b.date\n), ranked AS (\n  SELECT\n    Author_ID,\n    date,\n    hist_date,\n    publication_count,\n    ROW_NUMBER() OVER (PARTITION BY Author_ID, date ORDER BY hist_date DESC) AS rn\n  FROM joined\n)\nSELECT\n  Author_ID,\n  date,\n  COALESCE(MAX(CASE WHEN rn=1 THEN publication_count END), 0) AS y_lag_1,\n  COALESCE(MAX(CASE WHEN rn=2 THEN publication_count END), 0) AS y_lag_2,\n  COALESCE(AVG(CASE WHEN rn<=4 THEN publication_count END), 0) AS y_avg_last_4,\n  COALESCE(MAX(CASE WHEN rn=1 THEN publication_count END),0) - COALESCE(MAX(CASE WHEN rn=2 THEN publication_count END),0) AS y_trend_1m2,\n  (COALESCE(MAX(CASE WHEN rn=1 THEN publication_count END),0) + 1.0) / (COALESCE(MAX(CASE WHEN rn=2 THEN publication_count END),0) + 1.0) AS y_ratio_1m2,\n  COALESCE(DATE_DIFF('day', MAX(CASE WHEN rn=1 THEN hist_date END), date), 99999) AS days_since_last_y\nFROM ranked\nGROUP BY 1,2"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "gbdt",
+  "model_config": {
+    "objective": "regression_l1",
+    "n_estimators": 500,
+    "learning_rate": 0.05,
+    "max_depth": 6,
+    "min_child_samples": 20,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "log_transform_target": false
+  }
+}

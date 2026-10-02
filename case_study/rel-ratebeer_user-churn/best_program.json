@@ -1,0 +1,47 @@
+{
+  "feature_queries": [
+    {
+      "name": "user_profile",
+      "sql": "SELECT\n  e.user_id,\n  e.timestamp,\n  u.user_type,\n  u.beer_rating_count AS user_beer_rating_count_lifetime,\n  u.avg_beer_rating AS user_avg_beer_rating_lifetime,\n  u.max_beer_rating AS user_max_beer_rating_lifetime,\n  u.min_beer_rating AS user_min_beer_rating_lifetime,\n  u.place_rating_count AS user_place_rating_count_lifetime,\n  u.avg_place_rating AS user_avg_place_rating_lifetime,\n  u.favorite_count AS user_favorite_count_lifetime,\n  u.total_activity_count AS user_total_activity_count_lifetime,\n  DATE_DIFF('day', u.created_at, e.timestamp) AS user_age_days_asof,\n  DATE_DIFF('day', u.updated_at, e.timestamp) AS days_since_user_profile_update\nFROM eval_table e\nLEFT JOIN users u\n  ON e.user_id = u.user_id"
+    },
+    {
+      "name": "beer_activity",
+      "sql": "WITH br AS (\n  SELECT\n    e.user_id,\n    e.timestamp,\n    r.created_at,\n    r.total_score,\n    r.description_score\n  FROM eval_table e\n  LEFT JOIN beer_ratings r\n    ON r.user_id = e.user_id\n   AND r.created_at < e.timestamp\n)\nSELECT\n  user_id,\n  timestamp,\n  COUNT(created_at) AS beer_ratings_cnt_all,\n  AVG(total_score) AS beer_total_score_mean_all,\n  STDDEV_SAMP(total_score) AS beer_total_score_std_all,\n  AVG(description_score) AS beer_desc_score_mean_all,\n  MAX(created_at) AS beer_last_rating_ts,\n  DATE_DIFF('day', MAX(created_at), timestamp) AS beer_days_since_last_rating,\n  SUM(CASE WHEN DATE_DIFF('day', created_at, timestamp) BETWEEN 0 AND 7 THEN 1 ELSE 0 END) AS beer_ratings_cnt_7d,\n  SUM(CASE WHEN DATE_DIFF('day', created_at, timestamp) BETWEEN 0 AND 30 THEN 1 ELSE 0 END) AS beer_ratings_cnt_30d,\n  SUM(CASE WHEN DATE_DIFF('day', created_at, timestamp) BETWEEN 0 AND 90 THEN 1 ELSE 0 END) AS beer_ratings_cnt_90d,\n  SUM(CASE WHEN DATE_DIFF('day', created_at, timestamp) BETWEEN 0 AND 365 THEN 1 ELSE 0 END) AS beer_ratings_cnt_365d,\n  AVG(CASE WHEN DATE_DIFF('day', created_at, timestamp) BETWEEN 0 AND 30 THEN total_score ELSE NULL END) AS beer_total_score_mean_30d,\n  AVG(CASE WHEN DATE_DIFF('day', created_at, timestamp) BETWEEN 0 AND 90 THEN total_score ELSE NULL END) AS beer_total_score_mean_90d\nFROM br\nGROUP BY user_id, timestamp"
+    },
+    {
+      "name": "beer_diversity",
+      "sql": "WITH x AS (\n  SELECT\n    e.user_id,\n    e.timestamp,\n    r.created_at,\n    r.beer_id,\n    b.style_id,\n    b.brewer_id\n  FROM eval_table e\n  LEFT JOIN beer_ratings r\n    ON r.user_id = e.user_id\n   AND r.created_at < e.timestamp\n  LEFT JOIN beers b\n    ON b.beer_id = r.beer_id\n)\nSELECT\n  user_id,\n  timestamp,\n  COUNT(DISTINCT beer_id) AS distinct_beers_all,\n  COUNT(DISTINCT brewer_id) AS distinct_brewers_all,\n  COUNT(DISTINCT style_id) AS distinct_styles_all,\n  COUNT(DISTINCT CASE WHEN DATE_DIFF('day', created_at, timestamp) BETWEEN 0 AND 90 THEN beer_id ELSE NULL END) AS distinct_beers_90d,\n  COUNT(DISTINCT CASE WHEN DATE_DIFF('day', created_at, timestamp) BETWEEN 0 AND 90 THEN brewer_id ELSE NULL END) AS distinct_brewers_90d,\n  COUNT(DISTINCT CASE WHEN DATE_DIFF('day', created_at, timestamp) BETWEEN 0 AND 90 THEN style_id ELSE NULL END) AS distinct_styles_90d\nFROM x\nGROUP BY user_id, timestamp"
+    },
+    {
+      "name": "beer_lang",
+      "sql": "WITH x AS (\n  SELECT\n    e.user_id,\n    e.timestamp,\n    r.created_at,\n    r.language\n  FROM eval_table e\n  LEFT JOIN beer_ratings r\n    ON r.user_id = e.user_id\n   AND r.created_at < e.timestamp\n)\nSELECT\n  user_id,\n  timestamp,\n  SUM(CASE WHEN DATE_DIFF('day', created_at, timestamp) BETWEEN 0 AND 365 AND language = 'en' THEN 1 ELSE 0 END) AS lang_en_365d,\n  SUM(CASE WHEN DATE_DIFF('day', created_at, timestamp) BETWEEN 0 AND 365 AND language = 'es' THEN 1 ELSE 0 END) AS lang_es_365d,\n  SUM(CASE WHEN DATE_DIFF('day', created_at, timestamp) BETWEEN 0 AND 365 AND language = 'fr' THEN 1 ELSE 0 END) AS lang_fr_365d,\n  SUM(CASE WHEN DATE_DIFF('day', created_at, timestamp) BETWEEN 0 AND 365 AND language = 'de' THEN 1 ELSE 0 END) AS lang_de_365d,\n  SUM(CASE WHEN DATE_DIFF('day', created_at, timestamp) BETWEEN 0 AND 365 AND language = 'pt' THEN 1 ELSE 0 END) AS lang_pt_365d,\n  SUM(CASE WHEN DATE_DIFF('day', created_at, timestamp) BETWEEN 0 AND 365 AND language NOT IN ('en','es','fr','de','pt') THEN 1 ELSE 0 END) AS lang_other_365d\nFROM x\nGROUP BY user_id, timestamp"
+    },
+    {
+      "name": "user_x_activity",
+      "sql": "WITH u AS (\n  SELECT\n    user_id,\n    beer_rating_count AS lifetime_beer_cnt,\n    total_activity_count AS lifetime_total_cnt\n  FROM users\n), br AS (\n  SELECT\n    e.user_id,\n    e.timestamp,\n    COUNT(r.created_at) AS cnt_all,\n    SUM(CASE WHEN DATE_DIFF('day', r.created_at, e.timestamp) BETWEEN 0 AND 30 THEN 1 ELSE 0 END) AS cnt_30d,\n    SUM(CASE WHEN DATE_DIFF('day', r.created_at, e.timestamp) BETWEEN 0 AND 90 THEN 1 ELSE 0 END) AS cnt_90d,\n    SUM(CASE WHEN DATE_DIFF('day', r.created_at, e.timestamp) BETWEEN 0 AND 365 THEN 1 ELSE 0 END) AS cnt_365d,\n    MAX(r.created_at) AS last_ts\n  FROM eval_table e\n  LEFT JOIN beer_ratings r\n    ON r.user_id = e.user_id\n   AND r.created_at < e.timestamp\n  GROUP BY e.user_id, e.timestamp\n), j AS (\n  SELECT\n    e.user_id,\n    e.timestamp,\n    COALESCE(u.lifetime_beer_cnt,0) AS lifetime_beer_cnt,\n    COALESCE(u.lifetime_total_cnt,0) AS lifetime_total_cnt,\n    COALESCE(br.cnt_30d,0) AS cnt_30d,\n    COALESCE(br.cnt_90d,0) AS cnt_90d,\n    COALESCE(br.cnt_365d,0) AS cnt_365d,\n    br.last_ts,\n    DATE_DIFF('day', br.last_ts, e.timestamp) AS days_since_last\n  FROM eval_table e\n  LEFT JOIN u ON e.user_id=u.user_id\n  LEFT JOIN br ON e.user_id=br.user_id AND e.timestamp=br.timestamp\n)\nSELECT\n  user_id,\n  timestamp,\n  LOG(1 + lifetime_beer_cnt) AS log_lifetime_beer_cnt,\n  LOG(1 + lifetime_total_cnt) AS log_lifetime_total_cnt,\n  days_since_last,\n  (days_since_last / (1.0 + LOG(1 + lifetime_beer_cnt))) AS days_since_last_over_log_lifetime,\n  ((cnt_365d + 1.0) / (lifetime_beer_cnt + 1.0)) AS frac_lifetime_in_365d,\n  ((cnt_30d + 1.0) / (cnt_365d + 1.0)) AS ratio_30d_to_365d_again,\n  ((cnt_90d + 1.0) / (cnt_365d + 1.0)) AS ratio_90d_to_365d_again,\n  (cnt_30d / (1.0 + LOG(1 + lifetime_beer_cnt))) AS cnt_30d_over_log_lifetime,\n  (cnt_90d / (1.0 + LOG(1 + lifetime_beer_cnt))) AS cnt_90d_over_log_lifetime\nFROM j"
+    },
+    {
+      "name": "beer_burstiness",
+      "sql": "WITH x AS (\n  SELECT\n    e.user_id,\n    e.timestamp,\n    CAST(r.created_at AS DATE) AS d\n  FROM eval_table e\n  LEFT JOIN beer_ratings r\n    ON r.user_id=e.user_id\n   AND r.created_at < e.timestamp\n), day_counts AS (\n  SELECT\n    user_id,\n    timestamp,\n    d,\n    COUNT(*) AS cnt\n  FROM x\n  WHERE d IS NOT NULL\n  GROUP BY user_id, timestamp, d\n), agg AS (\n  SELECT\n    user_id,\n    timestamp,\n    COUNT(*) AS active_days_all,\n    SUM(CASE WHEN DATE_DIFF('day', d, timestamp) BETWEEN 0 AND 30 THEN 1 ELSE 0 END) AS active_days_30d,\n    SUM(CASE WHEN DATE_DIFF('day', d, timestamp) BETWEEN 0 AND 90 THEN 1 ELSE 0 END) AS active_days_90d,\n    SUM(CASE WHEN DATE_DIFF('day', d, timestamp) BETWEEN 0 AND 365 THEN 1 ELSE 0 END) AS active_days_365d,\n    MAX(CASE WHEN DATE_DIFF('day', d, timestamp) BETWEEN 0 AND 90 THEN cnt ELSE NULL END) AS max_ratings_in_a_day_90d,\n    MAX(CASE WHEN DATE_DIFF('day', d, timestamp) BETWEEN 0 AND 365 THEN cnt ELSE NULL END) AS max_ratings_in_a_day_365d,\n    SUM(CASE WHEN DATE_DIFF('day', d, timestamp) BETWEEN 0 AND 90 THEN cnt ELSE 0 END) AS total_ratings_90d_from_daycounts,\n    SUM(CASE WHEN DATE_DIFF('day', d, timestamp) BETWEEN 0 AND 365 THEN cnt ELSE 0 END) AS total_ratings_365d_from_daycounts\n  FROM day_counts\n  GROUP BY user_id, timestamp\n)\nSELECT\n  e.user_id,\n  e.timestamp,\n  a.active_days_all,\n  a.active_days_30d,\n  a.active_days_90d,\n  a.active_days_365d,\n  a.max_ratings_in_a_day_90d,\n  a.max_ratings_in_a_day_365d,\n  (a.max_ratings_in_a_day_90d * 1.0 / NULLIF(a.total_ratings_90d_from_daycounts, 0)) AS top_day_frac_90d,\n  (a.max_ratings_in_a_day_365d * 1.0 / NULLIF(a.total_ratings_365d_from_daycounts, 0)) AS top_day_frac_365d\nFROM eval_table e\nLEFT JOIN agg a\n  ON e.user_id=a.user_id AND e.timestamp=a.timestamp"
+    },
+    {
+      "name": "place_activity",
+      "sql": "WITH pr AS (\n  SELECT\n    e.user_id,\n    e.timestamp,\n    r.created_at,\n    r.total_score\n  FROM eval_table e\n  LEFT JOIN place_ratings r\n    ON r.user_id = e.user_id\n   AND r.created_at < e.timestamp\n)\nSELECT\n  user_id,\n  timestamp,\n  COUNT(created_at) AS place_ratings_cnt_all,\n  AVG(total_score) AS place_total_score_mean_all,\n  MAX(created_at) AS place_last_rating_ts,\n  DATE_DIFF('day', MAX(created_at), timestamp) AS place_days_since_last_rating,\n  SUM(CASE WHEN DATE_DIFF('day', created_at, timestamp) BETWEEN 0 AND 30 THEN 1 ELSE 0 END) AS place_ratings_cnt_30d,\n  SUM(CASE WHEN DATE_DIFF('day', created_at, timestamp) BETWEEN 0 AND 90 THEN 1 ELSE 0 END) AS place_ratings_cnt_90d\nFROM pr\nGROUP BY user_id, timestamp"
+    },
+    {
+      "name": "time_context",
+      "sql": "SELECT\n  user_id,\n  timestamp,\n  EXTRACT('dow' FROM timestamp) AS dow,\n  EXTRACT('month' FROM timestamp) AS month,\n  EXTRACT('year' FROM timestamp) AS year\nFROM eval_table"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "catboost",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.07,
+    "max_depth": 9,
+    "l2_leaf_reg": 5.0,
+    "categorical_features": [
+      "user_profile__user_type"
+    ]
+  }
+}

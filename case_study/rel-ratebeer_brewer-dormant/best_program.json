@@ -1,0 +1,54 @@
+{
+  "feature_queries": [
+    {
+      "name": "brewer_profile",
+      "sql": "SELECT\n  e.brewer_id,\n  e.timestamp,\n  b.country_id,\n  b.state_id,\n  b.type_id,\n  b.view_count AS brewer_view_count,\n  b.score AS brewer_score,\n  b.is_retired\nFROM eval_table e\nLEFT JOIN brewers b\n  ON b.brewer_id = e.brewer_id"
+    },
+    {
+      "name": "beer_history",
+      "sql": "WITH beer_before AS (\n  SELECT\n    e.brewer_id,\n    e.timestamp,\n    be.beer_id,\n    be.created_at\n  FROM eval_table e\n  LEFT JOIN beers be\n    ON be.brewer_id = e.brewer_id\n   AND be.created_at < e.timestamp\n)\nSELECT\n  brewer_id,\n  timestamp,\n  COUNT(beer_id) AS beers_created_total,\n  MIN(created_at) AS first_beer_created_at,\n  MAX(created_at) AS last_beer_created_at,\n  DATE_DIFF('day', MAX(created_at), timestamp) AS days_since_last_beer,\n  DATE_DIFF('day', MIN(created_at), timestamp) AS days_since_first_beer\nFROM beer_before\nGROUP BY brewer_id, timestamp"
+    },
+    {
+      "name": "beer_recency_windows",
+      "sql": "WITH beer_before AS (\n  SELECT\n    e.brewer_id,\n    e.timestamp,\n    be.created_at\n  FROM eval_table e\n  LEFT JOIN beers be\n    ON be.brewer_id = e.brewer_id\n   AND be.created_at < e.timestamp\n)\nSELECT\n  brewer_id,\n  timestamp,\n  SUM(CASE WHEN created_at >= timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END)  AS beers_created_30d,\n  SUM(CASE WHEN created_at >= timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END)  AS beers_created_90d,\n  SUM(CASE WHEN created_at >= timestamp - INTERVAL '180 days' THEN 1 ELSE 0 END) AS beers_created_180d,\n  SUM(CASE WHEN created_at >= timestamp - INTERVAL '365 days' THEN 1 ELSE 0 END) AS beers_created_365d,\n  SUM(CASE WHEN created_at >= timestamp - INTERVAL '730 days' THEN 1 ELSE 0 END) AS beers_created_730d\nFROM beer_before\nGROUP BY brewer_id, timestamp"
+    },
+    {
+      "name": "beer_cadence",
+      "sql": "WITH beer_before AS (\n  SELECT\n    e.brewer_id,\n    e.timestamp,\n    be.created_at\n  FROM eval_table e\n  JOIN beers be\n    ON be.brewer_id = e.brewer_id\n   AND be.created_at < e.timestamp\n),\nordered AS (\n  SELECT\n    brewer_id,\n    timestamp,\n    created_at,\n    LAG(created_at) OVER (PARTITION BY brewer_id, timestamp ORDER BY created_at) AS prev_created_at\n  FROM beer_before\n),\ngaps AS (\n  SELECT\n    brewer_id,\n    timestamp,\n    DATE_DIFF('day', prev_created_at, created_at) AS gap_days\n  FROM ordered\n  WHERE prev_created_at IS NOT NULL\n)\nSELECT\n  e.brewer_id,\n  e.timestamp,\n  AVG(g.gap_days) AS mean_gap_days,\n  STDDEV_SAMP(g.gap_days) AS std_gap_days,\n  MIN(g.gap_days) AS min_gap_days,\n  MAX(g.gap_days) AS max_gap_days,\n  SUM(CASE WHEN g.gap_days <= 7 THEN 1 ELSE 0 END) AS n_gaps_le_7d,\n  SUM(CASE WHEN g.gap_days <= 30 THEN 1 ELSE 0 END) AS n_gaps_le_30d\nFROM eval_table e\nLEFT JOIN gaps g\n  ON g.brewer_id = e.brewer_id\n AND g.timestamp = e.timestamp\nGROUP BY e.brewer_id, e.timestamp"
+    },
+    {
+      "name": "beer_style_recency",
+      "sql": "WITH beer_before AS (\n  SELECT\n    e.brewer_id,\n    e.timestamp,\n    be.style_id,\n    bs.category AS style_category,\n    be.created_at\n  FROM eval_table e\n  LEFT JOIN beers be\n    ON be.brewer_id = e.brewer_id\n   AND be.created_at < e.timestamp\n  LEFT JOIN beer_styles bs\n    ON bs.style_id = be.style_id\n),\nlast_beer AS (\n  SELECT\n    brewer_id,\n    timestamp,\n    style_category AS last_style_category\n  FROM (\n    SELECT\n      brewer_id,\n      timestamp,\n      style_category,\n      created_at,\n      ROW_NUMBER() OVER (PARTITION BY brewer_id, timestamp ORDER BY created_at DESC) AS rn\n    FROM beer_before\n    WHERE created_at IS NOT NULL\n  ) t\n  WHERE rn = 1\n)\nSELECT\n  bb.brewer_id,\n  bb.timestamp,\n  COUNT(DISTINCT bb.style_id) AS distinct_styles_total,\n  COUNT(DISTINCT CASE WHEN bb.created_at >= bb.timestamp - INTERVAL '365 days' THEN bb.style_id END) AS distinct_styles_365d,\n  COUNT(DISTINCT bb.style_category) AS distinct_style_categories_total,\n  COUNT(DISTINCT CASE WHEN bb.created_at >= bb.timestamp - INTERVAL '365 days' THEN bb.style_category END) AS distinct_style_categories_365d,\n  lb.last_style_category\nFROM beer_before bb\nLEFT JOIN last_beer lb\n  ON lb.brewer_id = bb.brewer_id\n AND lb.timestamp = bb.timestamp\nGROUP BY bb.brewer_id, bb.timestamp, lb.last_style_category"
+    },
+    {
+      "name": "rating_activity",
+      "sql": "WITH beer_before AS (\n  SELECT e.brewer_id, e.timestamp, be.beer_id\n  FROM eval_table e\n  JOIN beers be\n    ON be.brewer_id = e.brewer_id\n   AND be.created_at < e.timestamp\n),\nratings_before AS (\n  SELECT\n    bb.brewer_id,\n    bb.timestamp,\n    r.rating_id,\n    r.created_at,\n    r.total_score\n  FROM beer_before bb\n  LEFT JOIN beer_ratings r\n    ON r.beer_id = bb.beer_id\n   AND r.created_at < bb.timestamp\n)\nSELECT\n  brewer_id,\n  timestamp,\n  COUNT(rating_id) AS ratings_total,\n  DATE_DIFF('day', MAX(created_at), timestamp) AS days_since_last_rating,\n  SUM(CASE WHEN created_at >= timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS ratings_30d,\n  SUM(CASE WHEN created_at >= timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS ratings_90d,\n  SUM(CASE WHEN created_at >= timestamp - INTERVAL '365 days' THEN 1 ELSE 0 END) AS ratings_365d,\n  AVG(total_score) AS mean_rating_score\nFROM ratings_before\nGROUP BY brewer_id, timestamp"
+    },
+    {
+      "name": "quality_shift",
+      "sql": "WITH base AS (\n  SELECT\n    e.brewer_id,\n    e.timestamp,\n    (e.timestamp - INTERVAL '365 days') AS ts_365d\n  FROM eval_table e\n),\nbeer_before AS (\n  SELECT\n    b.brewer_id,\n    b.timestamp,\n    b.ts_365d,\n    be.avg_rating,\n    be.rating_count,\n    be.created_at\n  FROM base b\n  LEFT JOIN beers be\n    ON be.brewer_id = b.brewer_id\n   AND be.created_at < b.timestamp\n)\nSELECT\n  brewer_id,\n  timestamp,\n  AVG(CASE WHEN created_at >= ts_365d THEN avg_rating END) AS mean_beer_rating_recent_365d,\n  AVG(CASE WHEN created_at < ts_365d THEN avg_rating END) AS mean_beer_rating_older,\n  SUM(CASE WHEN created_at >= ts_365d THEN COALESCE(rating_count,0) ELSE 0 END) AS sum_rating_count_recent_365d,\n  SUM(CASE WHEN created_at < ts_365d THEN COALESCE(rating_count,0) ELSE 0 END) AS sum_rating_count_older\nFROM beer_before\nGROUP BY brewer_id, timestamp"
+    },
+    {
+      "name": "rater_diversity",
+      "sql": "WITH base AS (\n  SELECT\n    e.brewer_id,\n    e.timestamp,\n    (e.timestamp - INTERVAL '365 days') AS ts_365d\n  FROM eval_table e\n),\nbeer_before AS (\n  SELECT\n    b.brewer_id,\n    b.timestamp,\n    b.ts_365d,\n    be.beer_id\n  FROM base b\n  JOIN beers be\n    ON be.brewer_id = b.brewer_id\n   AND be.created_at < b.timestamp\n),\nratings_before AS (\n  SELECT\n    bb.brewer_id,\n    bb.timestamp,\n    bb.ts_365d,\n    r.user_id,\n    r.rating_id,\n    r.created_at\n  FROM beer_before bb\n  LEFT JOIN beer_ratings r\n    ON r.beer_id = bb.beer_id\n   AND r.created_at < bb.timestamp\n)\nSELECT\n  brewer_id,\n  timestamp,\n  COUNT(DISTINCT user_id) AS distinct_raters_total,\n  COUNT(DISTINCT CASE WHEN created_at >= ts_365d THEN user_id END) AS distinct_raters_365d\nFROM ratings_before\nGROUP BY brewer_id, timestamp"
+    },
+    {
+      "name": "rating_age_buckets",
+      "sql": "WITH base AS (\n  SELECT\n    e.brewer_id,\n    e.timestamp,\n    (e.timestamp - INTERVAL '30 days')  AS ts_30d,\n    (e.timestamp - INTERVAL '90 days')  AS ts_90d,\n    (e.timestamp - INTERVAL '180 days') AS ts_180d,\n    (e.timestamp - INTERVAL '365 days') AS ts_365d\n  FROM eval_table e\n),\nbeer_before AS (\n  SELECT\n    b.brewer_id,\n    b.timestamp,\n    b.ts_30d,\n    b.ts_90d,\n    b.ts_180d,\n    b.ts_365d,\n    be.beer_id\n  FROM base b\n  JOIN beers be\n    ON be.brewer_id = b.brewer_id\n   AND be.created_at < b.timestamp\n),\nratings_before AS (\n  SELECT\n    bb.brewer_id,\n    bb.timestamp,\n    bb.ts_30d,\n    bb.ts_90d,\n    bb.ts_180d,\n    bb.ts_365d,\n    r.rating_id,\n    r.created_at\n  FROM beer_before bb\n  LEFT JOIN beer_ratings r\n    ON r.beer_id = bb.beer_id\n   AND r.created_at < bb.timestamp\n)\nSELECT\n  brewer_id,\n  timestamp,\n  SUM(CASE WHEN created_at >= ts_30d THEN 1 ELSE 0 END) AS ratings_age_0_30d,\n  SUM(CASE WHEN created_at < ts_30d AND created_at >= ts_90d THEN 1 ELSE 0 END) AS ratings_age_30_90d,\n  SUM(CASE WHEN created_at < ts_90d AND created_at >= ts_180d THEN 1 ELSE 0 END) AS ratings_age_90_180d,\n  SUM(CASE WHEN created_at < ts_180d AND created_at >= ts_365d THEN 1 ELSE 0 END) AS ratings_age_180_365d,\n  SUM(CASE WHEN created_at < ts_365d THEN 1 ELSE 0 END) AS ratings_age_365plus\nFROM ratings_before\nGROUP BY brewer_id, timestamp"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "catboost",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.05,
+    "max_depth": 8,
+    "l2_leaf_reg": 3.0,
+    "categorical_features": [
+      "brewer_profile__country_id",
+      "brewer_profile__state_id",
+      "brewer_profile__type_id",
+      "beer_style_recency__last_style_category"
+    ]
+  }
+}

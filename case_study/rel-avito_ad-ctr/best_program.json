@@ -1,0 +1,36 @@
+{
+  "feature_queries": [
+    {
+      "name": "time_basic",
+      "sql": "SELECT AdID, timestamp, EXTRACT('dow' FROM timestamp) AS dow, EXTRACT('hour' FROM timestamp) AS hour, EXTRACT('day' FROM timestamp) AS day_of_month FROM eval_table"
+    },
+    {
+      "name": "search_multiwindow",
+      "sql": "WITH b AS (SELECT AdID, timestamp FROM eval_table) SELECT b.AdID, b.timestamp, SUM(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '1 day' AND ss.SearchDate < b.timestamp THEN 1 ELSE 0 END) AS impr_1d, SUM(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '4 day' AND ss.SearchDate < b.timestamp THEN 1 ELSE 0 END) AS impr_4d, SUM(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '14 day' AND ss.SearchDate < b.timestamp THEN 1 ELSE 0 END) AS impr_14d, SUM(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '1 day' AND ss.SearchDate < b.timestamp AND ss.IsClick=1 THEN 1 ELSE 0 END) AS click_1d, SUM(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '4 day' AND ss.SearchDate < b.timestamp AND ss.IsClick=1 THEN 1 ELSE 0 END) AS click_4d, SUM(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '14 day' AND ss.SearchDate < b.timestamp AND ss.IsClick=1 THEN 1 ELSE 0 END) AS click_14d, AVG(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '4 day' AND ss.SearchDate < b.timestamp THEN ss.Position END) AS avg_pos_4d, AVG(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '14 day' AND ss.SearchDate < b.timestamp THEN ss.Position END) AS avg_pos_14d, AVG(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '4 day' AND ss.SearchDate < b.timestamp THEN ss.HistCTR END) AS avg_histctr_4d, AVG(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '14 day' AND ss.SearchDate < b.timestamp THEN ss.HistCTR END) AS avg_histctr_14d, COUNT(DISTINCT CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '4 day' AND ss.SearchDate < b.timestamp THEN ss.SearchID END) AS search_sessions_4d, COUNT(DISTINCT CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '14 day' AND ss.SearchDate < b.timestamp THEN ss.SearchID END) AS search_sessions_14d FROM b LEFT JOIN SearchStream ss ON ss.AdID=b.AdID AND ss.SearchDate >= b.timestamp - INTERVAL '14 day' AND ss.SearchDate < b.timestamp GROUP BY b.AdID, b.timestamp"
+    },
+    {
+      "name": "derived_rates",
+      "sql": "WITH base AS (SELECT b.AdID, b.timestamp, SUM(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '4 day' AND ss.SearchDate < b.timestamp THEN 1 ELSE 0 END) AS impr_4d, SUM(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '14 day' AND ss.SearchDate < b.timestamp THEN 1 ELSE 0 END) AS impr_14d, SUM(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '4 day' AND ss.SearchDate < b.timestamp AND ss.IsClick=1 THEN 1 ELSE 0 END) AS click_4d, SUM(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '14 day' AND ss.SearchDate < b.timestamp AND ss.IsClick=1 THEN 1 ELSE 0 END) AS click_14d FROM eval_table b LEFT JOIN SearchStream ss ON ss.AdID=b.AdID AND ss.SearchDate >= b.timestamp - INTERVAL '14 day' AND ss.SearchDate < b.timestamp GROUP BY b.AdID, b.timestamp) SELECT AdID, timestamp, (click_4d + 1.0) / (impr_4d + 10.0) AS ctr_smooth_4d, (click_14d + 1.0) / (impr_14d + 10.0) AS ctr_smooth_14d, (click_4d + 1.0) / (impr_4d + 1.0) AS ctr_raw_4d, (click_14d + 1.0) / (impr_14d + 1.0) AS ctr_raw_14d, (impr_4d + 1.0) / (impr_14d + 1.0) AS impr_ratio_4d_14d, (click_4d + 1.0) / (click_14d + 1.0) AS click_ratio_4d_14d, LOG(1+impr_4d) AS log_impr_4d, LOG(1+impr_14d) AS log_impr_14d FROM base"
+    },
+    {
+      "name": "ad_window_priors",
+      "sql": "WITH global AS (SELECT AVG(num_click) AS global_mean FROM train_table) SELECT e.AdID, e.timestamp, COALESCE((SELECT AVG(t.num_click) FROM train_table t WHERE t.AdID=e.AdID AND t.timestamp >= e.timestamp - INTERVAL '1 day' AND t.timestamp < e.timestamp), (SELECT global_mean FROM global)) AS ad_mean_click_1d, COALESCE((SELECT AVG(t.num_click) FROM train_table t WHERE t.AdID=e.AdID AND t.timestamp >= e.timestamp - INTERVAL '4 day' AND t.timestamp < e.timestamp), (SELECT global_mean FROM global)) AS ad_mean_click_4d, COALESCE((SELECT AVG(t.num_click) FROM train_table t WHERE t.AdID=e.AdID AND t.timestamp >= e.timestamp - INTERVAL '14 day' AND t.timestamp < e.timestamp), (SELECT global_mean FROM global)) AS ad_mean_click_14d, COALESCE((SELECT COUNT(*) FROM train_table t WHERE t.AdID=e.AdID AND t.timestamp >= e.timestamp - INTERVAL '1 day' AND t.timestamp < e.timestamp),0) AS ad_n_1d, COALESCE((SELECT COUNT(*) FROM train_table t WHERE t.AdID=e.AdID AND t.timestamp >= e.timestamp - INTERVAL '4 day' AND t.timestamp < e.timestamp),0) AS ad_n_4d, COALESCE((SELECT COUNT(*) FROM train_table t WHERE t.AdID=e.AdID AND t.timestamp >= e.timestamp - INTERVAL '14 day' AND t.timestamp < e.timestamp),0) AS ad_n_14d FROM eval_table e"
+    },
+    {
+      "name": "interaction_features",
+      "sql": "WITH b AS (SELECT AdID, timestamp FROM eval_table), s AS (SELECT b.AdID, b.timestamp, SUM(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '4 day' AND ss.SearchDate < b.timestamp THEN 1 ELSE 0 END) AS impr_4d, SUM(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '14 day' AND ss.SearchDate < b.timestamp THEN 1 ELSE 0 END) AS impr_14d, SUM(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '4 day' AND ss.SearchDate < b.timestamp AND ss.IsClick=1 THEN 1 ELSE 0 END) AS click_4d, SUM(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '14 day' AND ss.SearchDate < b.timestamp AND ss.IsClick=1 THEN 1 ELSE 0 END) AS click_14d, AVG(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '14 day' AND ss.SearchDate < b.timestamp THEN ss.HistCTR END) AS avg_histctr_14d, AVG(CASE WHEN ss.SearchDate >= b.timestamp - INTERVAL '14 day' AND ss.SearchDate < b.timestamp THEN ss.Position END) AS avg_pos_14d FROM b LEFT JOIN SearchStream ss ON ss.AdID=b.AdID AND ss.SearchDate >= b.timestamp - INTERVAL '14 day' AND ss.SearchDate < b.timestamp GROUP BY b.AdID, b.timestamp) SELECT AdID, timestamp, ((click_14d + 1.0) / (impr_14d + 10.0)) * avg_histctr_14d AS ctr_smooth_x_histctr_14d, LOG(1+impr_14d) * avg_pos_14d AS logimpr_x_pos_14d, LOG(1+impr_14d) * avg_histctr_14d AS logimpr_x_histctr_14d, ((click_4d + 1.0) / (impr_4d + 10.0)) * LOG(1+impr_4d) AS ctr_x_logimpr_4d FROM s"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "gbdt",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.05,
+    "max_depth": 7,
+    "min_child_samples": 10,
+    "subsample": 0.85,
+    "colsample_bytree": 0.85,
+    "objective": "regression_l1",
+    "log_transform_target": true
+  }
+}

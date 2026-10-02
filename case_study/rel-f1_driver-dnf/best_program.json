@@ -1,0 +1,43 @@
+{
+  "feature_queries": [
+    {
+      "name": "driver_demo",
+      "sql": "SELECT e.driverId, e.date, d.nationality, date_diff('year', d.dob, e.date) AS age_years FROM eval_table e LEFT JOIN drivers d USING (driverId)"
+    },
+    {
+      "name": "recent_results",
+      "sql": "WITH hist AS ( SELECT e.driverId, e.date AS asof_date, r.date AS race_date, r.grid, r.positionOrder, r.points, r.laps, r.milliseconds, r.statusId, r.constructorId FROM eval_table e LEFT JOIN results r ON r.driverId=e.driverId AND r.date < e.date ) SELECT driverId, asof_date AS date, COUNT(race_date) AS n_races_total, SUM(CASE WHEN statusId <> 1 THEN 1 ELSE 0 END) AS n_dnf_total, AVG(CASE WHEN statusId <> 1 THEN 1.0 ELSE 0.0 END) AS dnf_rate_total, AVG(points) AS avg_points_total, AVG(positionOrder) AS avg_finish_order_total, AVG(grid) AS avg_grid_total, AVG(laps) AS avg_laps_total, AVG(milliseconds) AS avg_ms_total, MAX(race_date) AS last_race_date, date_diff('day', MAX(race_date), asof_date) AS days_since_last_race FROM hist GROUP BY 1,2"
+    },
+    {
+      "name": "windowed_results",
+      "sql": "WITH hist AS ( SELECT e.driverId, e.date AS asof_date, r.date AS race_date, r.grid, r.positionOrder, r.points, r.statusId FROM eval_table e LEFT JOIN results r ON r.driverId=e.driverId AND r.date < e.date ) SELECT driverId, asof_date AS date, SUM(CASE WHEN race_date >= asof_date - INTERVAL '30 days' THEN 1 ELSE 0 END) AS races_30d, SUM(CASE WHEN race_date >= asof_date - INTERVAL '30 days' AND statusId <> 1 THEN 1 ELSE 0 END) AS dnf_30d, AVG(CASE WHEN race_date >= asof_date - INTERVAL '30 days' THEN (statusId <> 1)::DOUBLE END) AS dnf_rate_30d, AVG(CASE WHEN race_date >= asof_date - INTERVAL '180 days' THEN (statusId <> 1)::DOUBLE END) AS dnf_rate_180d, AVG(CASE WHEN race_date >= asof_date - INTERVAL '365 days' THEN (statusId <> 1)::DOUBLE END) AS dnf_rate_365d, AVG(CASE WHEN race_date >= asof_date - INTERVAL '180 days' THEN points END) AS avg_points_180d, AVG(CASE WHEN race_date >= asof_date - INTERVAL '180 days' THEN positionOrder END) AS avg_finish_order_180d, AVG(CASE WHEN race_date >= asof_date - INTERVAL '180 days' THEN grid END) AS avg_grid_180d FROM hist GROUP BY 1,2"
+    },
+    {
+      "name": "recent_constructor",
+      "sql": "WITH last_race AS ( SELECT e.driverId, e.date AS asof_date, arg_max(r.constructorId, r.date) AS last_constructorId FROM eval_table e LEFT JOIN results r ON r.driverId=e.driverId AND r.date < e.date GROUP BY 1,2 ) SELECT driverId, asof_date AS date, last_constructorId FROM last_race"
+    },
+    {
+      "name": "qualifying_recent",
+      "sql": "WITH hist AS ( SELECT e.driverId, e.date AS asof_date, q.date AS qual_date, q.position AS qual_pos FROM eval_table e LEFT JOIN qualifying q ON q.driverId=e.driverId AND q.date < e.date ) SELECT driverId, asof_date AS date, COUNT(qual_date) AS n_quals_total, AVG(qual_pos) AS avg_qual_pos_total, MIN(qual_pos) AS best_qual_pos_total, AVG(CASE WHEN qual_date >= asof_date - INTERVAL '180 days' THEN qual_pos END) AS avg_qual_pos_180d FROM hist GROUP BY 1,2"
+    },
+    {
+      "name": "standings_recent",
+      "sql": "WITH hist AS ( SELECT e.driverId, e.date AS asof_date, s.date AS stand_date, s.points AS stand_points, s.position AS stand_pos, s.wins AS stand_wins FROM eval_table e LEFT JOIN standings s ON s.driverId=e.driverId AND s.date < e.date ) SELECT driverId, asof_date AS date, arg_max(stand_points, stand_date) AS last_stand_points, arg_max(stand_pos, stand_date) AS last_stand_pos, arg_max(stand_wins, stand_date) AS last_stand_wins, AVG(CASE WHEN stand_date >= asof_date - INTERVAL '180 days' THEN stand_points END) AS avg_stand_points_180d, AVG(CASE WHEN stand_date >= asof_date - INTERVAL '180 days' THEN stand_pos END) AS avg_stand_pos_180d FROM hist GROUP BY 1,2"
+    },
+    {
+      "name": "last_result_details",
+      "sql": "WITH hist AS ( SELECT e.driverId, e.date AS asof_date, r.date AS race_date, r.grid, r.positionOrder, r.points, r.laps, r.milliseconds, r.statusId, r.constructorId FROM eval_table e LEFT JOIN results r ON r.driverId=e.driverId AND r.date < e.date ) SELECT driverId, asof_date AS date, arg_max(grid, race_date) AS last_grid, arg_max(positionOrder, race_date) AS last_finish_order, arg_max(points, race_date) AS last_points, arg_max(laps, race_date) AS last_laps, arg_max(milliseconds, race_date) AS last_ms, arg_max(statusId, race_date) AS last_statusId, CASE WHEN arg_max(statusId, race_date) <> 1 THEN 1 ELSE 0 END AS last_was_dnf, arg_max(constructorId, race_date) AS last_constructorId_2 FROM hist GROUP BY 1,2"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "gbdt",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.03,
+    "max_depth": 5,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_samples": 20,
+    "lambda_l2": 2.0
+  }
+}

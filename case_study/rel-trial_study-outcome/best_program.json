@@ -1,0 +1,24 @@
+{
+  "feature_queries": [
+    {
+      "name": "study_static",
+      "sql": "SELECT\n  tt.nct_id,\n  tt.timestamp,\n  EXTRACT(year FROM tt.timestamp) AS asof_year,\n  s.study_type,\n  s.phase,\n  s.enrollment,\n  s.enrollment_type,\n  s.source,\n  s.source_class,\n  s.has_dmc,\n  s.is_fda_regulated_drug,\n  s.is_fda_regulated_device,\n  s.is_unapproved_device,\n  s.is_ppsd,\n  s.is_us_export,\n  s.fdaaa801_violation,\n  s.plan_to_share_ipd,\n  s.number_of_arms,\n  s.number_of_groups,\n  datediff('day', s.start_date, tt.timestamp) AS days_since_start\nFROM eval_table tt\nLEFT JOIN studies s\n  ON s.nct_id = tt.nct_id"
+    },
+    {
+      "name": "sponsor_counts",
+      "sql": "SELECT\n  tt.nct_id,\n  tt.timestamp,\n  COUNT(DISTINCT ss.sponsor_id) AS n_sponsors,\n  SUM(CASE WHEN sp.agency_class='NIH' THEN 1 ELSE 0 END) AS n_sponsors_nih,\n  SUM(CASE WHEN sp.agency_class='INDUSTRY' THEN 1 ELSE 0 END) AS n_sponsors_industry,\n  SUM(CASE WHEN sp.agency_class='OTHER' THEN 1 ELSE 0 END) AS n_sponsors_other\nFROM eval_table tt\nLEFT JOIN sponsors_studies ss\n  ON ss.nct_id = tt.nct_id\nLEFT JOIN sponsors sp\n  ON sp.sponsor_id = ss.sponsor_id\nGROUP BY tt.nct_id, tt.timestamp"
+    },
+    {
+      "name": "condition_intervention_counts",
+      "sql": "SELECT\n  tt.nct_id,\n  tt.timestamp,\n  COUNT(DISTINCT cs.condition_id) AS n_conditions,\n  COUNT(DISTINCT isx.intervention_id) AS n_interventions\nFROM eval_table tt\nLEFT JOIN conditions_studies cs\n  ON cs.nct_id = tt.nct_id\nLEFT JOIN interventions_studies isx\n  ON isx.nct_id = tt.nct_id\nGROUP BY tt.nct_id, tt.timestamp"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "catboost",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.012,
+    "max_depth": 5,
+    "l2_leaf_reg": 10.0
+  }
+}

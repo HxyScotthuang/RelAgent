@@ -1,0 +1,56 @@
+{
+  "feature_queries": [
+    {
+      "name": "time_calendar",
+      "sql": "SELECT e.customer_id, e.timestamp,\n       EXTRACT(year FROM e.timestamp) AS asof_year,\n       EXTRACT(month FROM e.timestamp) AS asof_month,\n       EXTRACT(day FROM e.timestamp) AS asof_day\nFROM eval_table e"
+    },
+    {
+      "name": "customer_static",
+      "sql": "SELECT e.customer_id, e.timestamp,\n       CASE WHEN c.customer_name IS NULL THEN 0 ELSE 1 END AS has_customer_name,\n       LENGTH(COALESCE(c.customer_name,'')) AS customer_name_len\nFROM eval_table e\nLEFT JOIN customer c ON e.customer_id = c.customer_id"
+    },
+    {
+      "name": "review_recency_counts",
+      "sql": "WITH r AS (\n  SELECT e.customer_id, e.timestamp,\n         COUNT(*) FILTER (WHERE rv.review_time < e.timestamp) AS n_reviews_all_time,\n         COUNT(*) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '7 days' AND rv.review_time < e.timestamp) AS n_reviews_7d,\n         COUNT(*) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '30 days' AND rv.review_time < e.timestamp) AS n_reviews_30d,\n         COUNT(*) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '60 days' AND rv.review_time < e.timestamp) AS n_reviews_60d,\n         COUNT(*) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '90 days' AND rv.review_time < e.timestamp) AS n_reviews_90d,\n         COUNT(*) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '180 days' AND rv.review_time < e.timestamp) AS n_reviews_180d,\n         COUNT(*) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '365 days' AND rv.review_time < e.timestamp) AS n_reviews_365d,\n         MAX(rv.review_time) FILTER (WHERE rv.review_time < e.timestamp) AS last_review_time,\n         MIN(rv.review_time) FILTER (WHERE rv.review_time < e.timestamp) AS first_review_time\n  FROM eval_table e\n  LEFT JOIN review rv\n    ON rv.customer_id = e.customer_id\n   AND rv.review_time < e.timestamp\n  GROUP BY e.customer_id, e.timestamp\n)\nSELECT customer_id, timestamp,\n       n_reviews_all_time, n_reviews_7d, n_reviews_30d, n_reviews_60d, n_reviews_90d, n_reviews_180d, n_reviews_365d,\n       CASE WHEN last_review_time IS NULL THEN NULL\n            ELSE DATE_DIFF('day', last_review_time, timestamp) END AS days_since_last_review,\n       CASE WHEN first_review_time IS NULL THEN NULL\n            ELSE DATE_DIFF('day', first_review_time, timestamp) END AS days_since_first_review\nFROM r"
+    },
+    {
+      "name": "review_gaps_stats",
+      "sql": "WITH last_two AS (\n  SELECT\n    e.customer_id,\n    e.timestamp,\n    MAX(rv.review_time) AS last_t\n  FROM eval_table e\n  LEFT JOIN review rv\n    ON rv.customer_id = e.customer_id\n   AND rv.review_time < e.timestamp\n  GROUP BY e.customer_id, e.timestamp\n), prev AS (\n  SELECT\n    lt.customer_id,\n    lt.timestamp,\n    MAX(rv.review_time) AS prev_t\n  FROM last_two lt\n  LEFT JOIN review rv\n    ON rv.customer_id = lt.customer_id\n   AND rv.review_time < lt.last_t\n  GROUP BY lt.customer_id, lt.timestamp\n)\nSELECT\n  lt.customer_id,\n  lt.timestamp,\n  CASE WHEN lt.last_t IS NULL THEN NULL ELSE DATE_DIFF('day', lt.last_t, lt.timestamp) END AS gap_days_since_last,\n  CASE WHEN lt.last_t IS NULL OR p.prev_t IS NULL THEN NULL ELSE DATE_DIFF('day', p.prev_t, lt.last_t) END AS gap_days_prev_to_last\nFROM last_two lt\nLEFT JOIN prev p\n  ON p.customer_id = lt.customer_id AND p.timestamp = lt.timestamp"
+    },
+    {
+      "name": "review_velocity_trend",
+      "sql": "SELECT e.customer_id, e.timestamp,\n       (COUNT(*) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '30 days' AND rv.review_time < e.timestamp)\n        -\n        COUNT(*) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '60 days' AND rv.review_time < e.timestamp - INTERVAL '30 days'))\n         AS delta_reviews_last30_vs_prev30,\n       (COUNT(*) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '90 days' AND rv.review_time < e.timestamp)\n        -\n        COUNT(*) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '180 days' AND rv.review_time < e.timestamp - INTERVAL '90 days'))\n         AS delta_reviews_last90_vs_prev90\nFROM eval_table e\nLEFT JOIN review rv\n  ON rv.customer_id = e.customer_id\n AND rv.review_time < e.timestamp\nGROUP BY e.customer_id, e.timestamp"
+    },
+    {
+      "name": "active_days_spread",
+      "sql": "WITH base AS (\n  SELECT e.customer_id, e.timestamp, CAST(rv.review_time AS DATE) AS rday\n  FROM eval_table e\n  LEFT JOIN review rv\n    ON rv.customer_id = e.customer_id\n   AND rv.review_time < e.timestamp\n)\nSELECT customer_id, timestamp,\n       COUNT(DISTINCT rday) FILTER (WHERE rday >= CAST(timestamp - INTERVAL '30 days' AS DATE) AND rday < CAST(timestamp AS DATE)) AS n_active_days_30d,\n       COUNT(DISTINCT rday) FILTER (WHERE rday >= CAST(timestamp - INTERVAL '90 days' AS DATE) AND rday < CAST(timestamp AS DATE)) AS n_active_days_90d,\n       COUNT(DISTINCT rday) FILTER (WHERE rday >= CAST(timestamp - INTERVAL '365 days' AS DATE) AND rday < CAST(timestamp AS DATE)) AS n_active_days_365d\nFROM base\nGROUP BY customer_id, timestamp"
+    },
+    {
+      "name": "review_rating_verified_filled",
+      "sql": "WITH s AS (\nSELECT e.customer_id, e.timestamp,\n       AVG(rv.rating) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '365 days' AND rv.review_time < e.timestamp) AS avg_rating_365d,\n       STDDEV_SAMP(rv.rating) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '365 days' AND rv.review_time < e.timestamp) AS std_rating_365d,\n       AVG(rv.rating) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '90 days' AND rv.review_time < e.timestamp) AS avg_rating_90d,\n       AVG(rv.rating) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '180 days' AND rv.review_time < e.timestamp - INTERVAL '90 days') AS avg_rating_prev90d,\n       AVG(CASE WHEN rv.verified THEN 1 ELSE 0 END) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '365 days' AND rv.review_time < e.timestamp) AS frac_verified_365d,\n       AVG(CASE WHEN rv.verified THEN 1 ELSE 0 END) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '90 days' AND rv.review_time < e.timestamp) AS frac_verified_90d,\n       AVG(CASE WHEN rv.verified THEN 1 ELSE 0 END) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '180 days' AND rv.review_time < e.timestamp - INTERVAL '90 days') AS frac_verified_prev90d\nFROM eval_table e\nLEFT JOIN review rv\n  ON rv.customer_id = e.customer_id\n AND rv.review_time < e.timestamp\nGROUP BY e.customer_id, e.timestamp\n)\nSELECT\n  customer_id, timestamp,\n  avg_rating_365d, std_rating_365d,\n  COALESCE(avg_rating_90d, avg_rating_365d) AS avg_rating_90d_filled,\n  CASE WHEN avg_rating_90d IS NULL THEN 0 ELSE 1 END AS has_rating_90d,\n  CASE WHEN avg_rating_prev90d IS NULL THEN 0 ELSE 1 END AS has_rating_prev90d,\n  COALESCE(avg_rating_90d, avg_rating_365d, 0) - COALESCE(avg_rating_prev90d, avg_rating_365d, 0) AS delta_avg_rating_90d_filled,\n  frac_verified_365d,\n  COALESCE(frac_verified_90d, frac_verified_365d) AS frac_verified_90d_filled,\n  CASE WHEN frac_verified_90d IS NULL THEN 0 ELSE 1 END AS has_verified_90d,\n  CASE WHEN frac_verified_prev90d IS NULL THEN 0 ELSE 1 END AS has_verified_prev90d,\n  COALESCE(frac_verified_90d, frac_verified_365d, 0) - COALESCE(frac_verified_prev90d, frac_verified_365d, 0) AS delta_frac_verified_90d_filled\nFROM s"
+    },
+    {
+      "name": "review_product_diversity",
+      "sql": "WITH base AS (\n  SELECT e.customer_id, e.timestamp, rv.product_id\n  FROM eval_table e\n  LEFT JOIN review rv\n    ON rv.customer_id = e.customer_id\n   AND rv.review_time >= e.timestamp - INTERVAL '365 days'\n   AND rv.review_time < e.timestamp\n)\nSELECT customer_id, timestamp,\n       COUNT(product_id) AS n_reviews_365d_for_div,\n       COUNT(DISTINCT product_id) AS n_distinct_products_365d,\n       CASE WHEN COUNT(product_id)=0 THEN NULL ELSE COUNT(DISTINCT product_id)*1.0/COUNT(product_id) END AS product_diversity_ratio_365d\nFROM base\nGROUP BY customer_id, timestamp"
+    },
+    {
+      "name": "product_price_stats",
+      "sql": "SELECT e.customer_id, e.timestamp,\n       AVG(p.price) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '365 days' AND rv.review_time < e.timestamp) AS avg_price_reviewed_365d,\n       MIN(p.price) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '365 days' AND rv.review_time < e.timestamp) AS min_price_reviewed_365d,\n       MAX(p.price) FILTER (WHERE rv.review_time >= e.timestamp - INTERVAL '365 days' AND rv.review_time < e.timestamp) AS max_price_reviewed_365d\nFROM eval_table e\nLEFT JOIN review rv\n  ON rv.customer_id = e.customer_id\n AND rv.review_time < e.timestamp\nLEFT JOIN product p\n  ON p.product_id = rv.product_id\nGROUP BY e.customer_id, e.timestamp"
+    },
+    {
+      "name": "brand_diversity_windows",
+      "sql": "WITH base AS (\n  SELECT e.customer_id, e.timestamp, rv.review_time, p.brand\n  FROM eval_table e\n  LEFT JOIN review rv\n    ON rv.customer_id = e.customer_id\n   AND rv.review_time < e.timestamp\n  LEFT JOIN product p\n    ON p.product_id = rv.product_id\n)\nSELECT customer_id, timestamp,\n       COUNT(DISTINCT brand) FILTER (WHERE review_time >= timestamp - INTERVAL '30 days' AND review_time < timestamp) AS n_distinct_brands_30d,\n       COUNT(DISTINCT brand) FILTER (WHERE review_time >= timestamp - INTERVAL '90 days' AND review_time < timestamp) AS n_distinct_brands_90d,\n       COUNT(DISTINCT brand) FILTER (WHERE review_time >= timestamp - INTERVAL '365 days' AND review_time < timestamp) AS n_distinct_brands_365d\nFROM base\nGROUP BY customer_id, timestamp"
+    },
+    {
+      "name": "category_diversity_windows",
+      "sql": "WITH base AS (\n  SELECT e.customer_id, e.timestamp, rv.review_time, p.category\n  FROM eval_table e\n  LEFT JOIN review rv\n    ON rv.customer_id = e.customer_id\n   AND rv.review_time < e.timestamp\n  LEFT JOIN product p\n    ON p.product_id = rv.product_id\n), exploded AS (\n  SELECT customer_id, timestamp, review_time, UNNEST(category) AS cat\n  FROM base\n  WHERE category IS NOT NULL\n)\nSELECT\n  e.customer_id,\n  e.timestamp,\n  COUNT(DISTINCT ex.cat) FILTER (WHERE ex.review_time >= e.timestamp - INTERVAL '30 days' AND ex.review_time < e.timestamp) AS n_distinct_categories_30d,\n  COUNT(DISTINCT ex.cat) FILTER (WHERE ex.review_time >= e.timestamp - INTERVAL '90 days' AND ex.review_time < e.timestamp) AS n_distinct_categories_90d,\n  COUNT(DISTINCT ex.cat) FILTER (WHERE ex.review_time >= e.timestamp - INTERVAL '365 days' AND ex.review_time < e.timestamp) AS n_distinct_categories_365d\nFROM eval_table e\nLEFT JOIN exploded ex\n  ON ex.customer_id = e.customer_id AND ex.timestamp = e.timestamp\nGROUP BY e.customer_id, e.timestamp"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "catboost",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.06,
+    "max_depth": 8,
+    "l2_leaf_reg": 4.0
+  }
+}

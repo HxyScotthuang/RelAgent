@@ -1,0 +1,42 @@
+{
+  "feature_queries": [
+    {
+      "name": "product_static",
+      "sql": "SELECT\n  e.product_id,\n  e.timestamp,\n  p.price,\n  p.brand,\n  array_length(p.category) AS n_categories,\n  p.category[2] AS cat_top,\n  p.category[3] AS cat_sub,\n  LENGTH(p.title) AS title_len,\n  LENGTH(p.description) AS desc_len\nFROM eval_table e\nLEFT JOIN product p USING(product_id)"
+    },
+    {
+      "name": "review_dense",
+      "sql": "WITH r AS (\n  SELECT\n    e.product_id,\n    e.timestamp,\n    rv.rating,\n    rv.verified,\n    rv.review_time,\n    rv.customer_id\n  FROM eval_table e\n  LEFT JOIN review rv\n    ON rv.product_id = e.product_id\n   AND rv.review_time < e.timestamp\n)\nSELECT\n  product_id,\n  timestamp,\n  COUNT(*) AS rev_cnt_all,\n  COUNT(DISTINCT customer_id) AS rev_cust_distinct_all,\n  AVG(rating) AS rev_rating_mean_all,\n  STDDEV_POP(rating) AS rev_rating_std_all,\n  AVG(CASE WHEN verified THEN 1.0 ELSE 0.0 END) AS rev_verified_rate_all,\n\n  COUNT(*) FILTER (WHERE review_time >= timestamp - INTERVAL '7 days') AS rev_cnt_7d,\n  COUNT(*) FILTER (WHERE review_time >= timestamp - INTERVAL '30 days') AS rev_cnt_30d,\n  COUNT(*) FILTER (WHERE review_time >= timestamp - INTERVAL '90 days') AS rev_cnt_90d,\n  COUNT(*) FILTER (WHERE review_time >= timestamp - INTERVAL '180 days') AS rev_cnt_180d,\n\n  (COUNT(*) FILTER (WHERE review_time >= timestamp - INTERVAL '30 days')) / 30.0 AS rev_rate_30d_per_day,\n  (COUNT(*) FILTER (WHERE review_time >= timestamp - INTERVAL '180 days')) / 180.0 AS rev_rate_180d_per_day,\n  ((COUNT(*) FILTER (WHERE review_time >= timestamp - INTERVAL '30 days')) / 30.0) - ((COUNT(*) FILTER (WHERE review_time >= timestamp - INTERVAL '180 days')) / 180.0) AS rev_rate_delta_30d_vs_180d,\n\n  MAX(review_time) AS last_review_time,\n  DATE_DIFF('day', MAX(review_time), timestamp) AS days_since_last_review\nFROM r\nGROUP BY product_id, timestamp"
+    },
+    {
+      "name": "review_momentum",
+      "sql": "WITH r AS (\n  SELECT\n    e.product_id,\n    e.timestamp,\n    rv.rating,\n    rv.review_time\n  FROM eval_table e\n  LEFT JOIN review rv\n    ON rv.product_id = e.product_id\n   AND rv.review_time < e.timestamp\n)\nSELECT\n  product_id,\n  timestamp,\n  LN(1 + COUNT(*) FILTER (WHERE review_time >= timestamp - INTERVAL '30 days')) AS log_rev_cnt_30d,\n  LN(1 + COUNT(*) FILTER (WHERE review_time >= timestamp - INTERVAL '180 days')) AS log_rev_cnt_180d,\n  (COUNT(*) FILTER (WHERE review_time >= timestamp - INTERVAL '30 days')) * 1.0 / (1.0 + COUNT(*) FILTER (WHERE review_time >= timestamp - INTERVAL '180 days')) AS rev_share_30_over_180,\n  AVG(rating) FILTER (WHERE review_time >= timestamp - INTERVAL '30 days') AS rating_mean_30d,\n  AVG(rating) FILTER (WHERE review_time >= timestamp - INTERVAL '180 days') AS rating_mean_180d,\n  (AVG(rating) FILTER (WHERE review_time >= timestamp - INTERVAL '30 days')) - (AVG(rating) FILTER (WHERE review_time >= timestamp - INTERVAL '180 days')) AS rating_delta_30_vs_180\nFROM r\nGROUP BY product_id, timestamp"
+    },
+    {
+      "name": "brand_trend_ratings",
+      "sql": "WITH ebrand AS (\n  SELECT\n    e.product_id,\n    e.timestamp,\n    p.brand\n  FROM eval_table e\n  LEFT JOIN product p USING(product_id)\n), prod_counts AS (\n  SELECT\n    eb.product_id,\n    eb.timestamp,\n    eb.brand,\n    COUNT(*) FILTER (WHERE rv.review_time >= eb.timestamp - INTERVAL '30 days') AS prod_rev_30d,\n    COUNT(*) FILTER (WHERE rv.review_time >= eb.timestamp - INTERVAL '180 days') AS prod_rev_180d\n  FROM ebrand eb\n  LEFT JOIN review rv\n    ON rv.product_id = eb.product_id\n   AND rv.review_time < eb.timestamp\n  GROUP BY eb.product_id, eb.timestamp, eb.brand\n), brand_agg AS (\n  SELECT\n    brand,\n    timestamp,\n    SUM(prod_rev_30d) AS brand_rev_30d_sum,\n    SUM(prod_rev_180d) AS brand_rev_180d_sum,\n    AVG(prod_rev_30d) AS brand_rev_30d_avg,\n    AVG(prod_rev_180d) AS brand_rev_180d_avg\n  FROM prod_counts\n  GROUP BY brand, timestamp\n), brand_ratings AS (\n  SELECT\n    eb.brand,\n    eb.timestamp,\n    AVG(rv.rating) FILTER (WHERE rv.review_time >= eb.timestamp - INTERVAL '30 days') AS brand_rating_mean_30d,\n    AVG(rv.rating) FILTER (WHERE rv.review_time >= eb.timestamp - INTERVAL '180 days') AS brand_rating_mean_180d,\n    AVG(CASE WHEN rv.verified THEN 1.0 ELSE 0.0 END) FILTER (WHERE rv.review_time >= eb.timestamp - INTERVAL '30 days') AS brand_verified_rate_30d,\n    AVG(CASE WHEN rv.verified THEN 1.0 ELSE 0.0 END) FILTER (WHERE rv.review_time >= eb.timestamp - INTERVAL '180 days') AS brand_verified_rate_180d\n  FROM ebrand eb\n  LEFT JOIN review rv\n    ON rv.product_id = eb.product_id\n   AND rv.review_time < eb.timestamp\n  GROUP BY eb.brand, eb.timestamp\n)\nSELECT\n  e.product_id,\n  e.timestamp,\n  e.brand,\n  ba.brand_rev_30d_sum,\n  ba.brand_rev_180d_sum,\n  ba.brand_rev_30d_avg,\n  ba.brand_rev_180d_avg,\n  ba.brand_rev_30d_sum * 1.0 / (1.0 + ba.brand_rev_180d_sum) AS brand_share_30_over_180,\n  br.brand_rating_mean_30d,\n  br.brand_rating_mean_180d,\n  br.brand_rating_mean_30d - br.brand_rating_mean_180d AS brand_rating_delta_30_vs_180,\n  br.brand_verified_rate_30d,\n  br.brand_verified_rate_180d,\n  br.brand_verified_rate_30d - br.brand_verified_rate_180d AS brand_verified_delta_30_vs_180\nFROM (SELECT DISTINCT brand, timestamp, product_id FROM ebrand) e\nLEFT JOIN brand_agg ba\n  ON ba.brand = e.brand AND ba.timestamp = e.timestamp\nLEFT JOIN brand_ratings br\n  ON br.brand = e.brand AND br.timestamp = e.timestamp"
+    },
+    {
+      "name": "time_feats",
+      "sql": "SELECT\n  product_id,\n  timestamp,\n  SIN(2*PI()*EXTRACT(doy FROM timestamp)/365.25) AS doy_sin,\n  COS(2*PI()*EXTRACT(doy FROM timestamp)/365.25) AS doy_cos,\n  SIN(2*PI()*EXTRACT(month FROM timestamp)/12.0) AS month_sin,\n  COS(2*PI()*EXTRACT(month FROM timestamp)/12.0) AS month_cos,\n  EXTRACT(year FROM timestamp) AS year\nFROM eval_table"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "xgboost",
+  "model_config": {
+    "objective": "reg:absoluteerror",
+    "n_estimators": 500,
+    "learning_rate": 0.05,
+    "max_depth": 8,
+    "min_child_weight": 50,
+    "subsample": 1.0,
+    "colsample_bytree": 1.0,
+    "log_transform_target": true,
+    "categorical_features": [
+      "product_static__brand",
+      "product_static__cat_top",
+      "product_static__cat_sub",
+      "brand_trend_ratings__brand"
+    ]
+  }
+}

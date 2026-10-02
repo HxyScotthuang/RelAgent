@@ -1,0 +1,53 @@
+{
+  "feature_queries": [
+    {
+      "name": "beer_static",
+      "sql": "SELECT e.beer_id, e.timestamp, b.brewer_id, b.style_id, b.alcohol_pct, b.ibu, b.is_seasonal::INT AS is_seasonal, b.is_one_off::INT AS is_one_off, b.is_alias::INT AS is_alias, b.is_verified::INT AS is_verified, b.is_retired::INT AS is_retired, b.has_pic::INT AS has_pic, b.view_count, b.avg_rating, b.rating_count, b.real_avg_rating, b.straight_avg_rating, b.straight_rating_count, b.rating_std_dev, b.overall_percentile, b.style_percentile, b.last_9m_avg, b.last_9m_count, date_diff('day', b.created_at, e.timestamp) AS beer_age_days FROM eval_table e LEFT JOIN beers b USING (beer_id)"
+    },
+    {
+      "name": "style_static",
+      "sql": "SELECT e.beer_id, e.timestamp, s.parent_style_id, s.category AS style_category FROM eval_table e LEFT JOIN beers b USING (beer_id) LEFT JOIN beer_styles s ON b.style_id = s.style_id"
+    },
+    {
+      "name": "brewer_static",
+      "sql": "SELECT e.beer_id, e.timestamp, br.country_id AS brewer_country_id, br.state_id AS brewer_state_id, br.type_id AS brewer_type_id, br.has_logo::INT AS brewer_has_logo, br.view_count AS brewer_view_count, br.score AS brewer_score, br.is_out_of_business::INT AS brewer_oob, br.is_retired::INT AS brewer_retired FROM eval_table e LEFT JOIN beers b USING (beer_id) LEFT JOIN brewers br ON b.brewer_id = br.brewer_id"
+    },
+    {
+      "name": "ratings_recency_counts",
+      "sql": "WITH r AS (SELECT e.beer_id, e.timestamp, br.created_at FROM eval_table e LEFT JOIN beer_ratings br ON br.beer_id = e.beer_id AND br.created_at < e.timestamp) SELECT beer_id, timestamp, COUNT(created_at) AS rating_cnt_before, MAX(created_at) AS last_rating_ts, date_diff('day', MAX(created_at), timestamp) AS days_since_last_rating, SUM(CASE WHEN created_at >= timestamp - INTERVAL '7 days' THEN 1 ELSE 0 END) AS rating_cnt_7d, SUM(CASE WHEN created_at >= timestamp - INTERVAL '30 days' THEN 1 ELSE 0 END) AS rating_cnt_30d, SUM(CASE WHEN created_at >= timestamp - INTERVAL '90 days' THEN 1 ELSE 0 END) AS rating_cnt_90d, SUM(CASE WHEN created_at >= timestamp - INTERVAL '180 days' THEN 1 ELSE 0 END) AS rating_cnt_180d, SUM(CASE WHEN created_at >= timestamp - INTERVAL '365 days' THEN 1 ELSE 0 END) AS rating_cnt_365d FROM r GROUP BY 1,2"
+    },
+    {
+      "name": "ratings_score_stats",
+      "sql": "WITH r AS (SELECT e.beer_id, e.timestamp, br.total_score, br.aroma, br.flavor, br.mouthfeel, br.appearance, br.overall FROM eval_table e LEFT JOIN beer_ratings br ON br.beer_id = e.beer_id AND br.created_at < e.timestamp) SELECT beer_id, timestamp, AVG(total_score) AS avg_total_score_before, STDDEV_SAMP(total_score) AS std_total_score_before, AVG(aroma) AS avg_aroma_before, AVG(flavor) AS avg_flavor_before, AVG(mouthfeel) AS avg_mouthfeel_before, AVG(appearance) AS avg_appearance_before, AVG(overall) AS avg_overall_before FROM r GROUP BY 1,2"
+    },
+    {
+      "name": "ratings_user_agg",
+      "sql": "WITH r AS (SELECT e.beer_id, e.timestamp, br.user_id FROM eval_table e LEFT JOIN beer_ratings br ON br.beer_id = e.beer_id AND br.created_at < e.timestamp) SELECT beer_id, timestamp, COUNT(DISTINCT user_id) AS n_unique_raters_before FROM r GROUP BY 1,2"
+    },
+    {
+      "name": "ratings_user_quality",
+      "sql": "WITH ru AS (SELECT e.beer_id, e.timestamp, u.beer_rating_count, u.avg_beer_rating, u.total_activity_count FROM eval_table e LEFT JOIN beer_ratings br ON br.beer_id = e.beer_id AND br.created_at < e.timestamp LEFT JOIN users u ON br.user_id = u.user_id) SELECT beer_id, timestamp, AVG(beer_rating_count) AS avg_rater_beer_rating_count, AVG(total_activity_count) AS avg_rater_total_activity, AVG(avg_beer_rating) AS avg_rater_avg_beer_rating FROM ru GROUP BY 1,2"
+    },
+    {
+      "name": "favorites_counts",
+      "sql": "WITH f AS (SELECT e.beer_id, e.timestamp, fav.created_at FROM eval_table e LEFT JOIN favorites fav ON fav.beer_id = e.beer_id AND fav.created_at < e.timestamp) SELECT beer_id, timestamp, COUNT(created_at) AS fav_cnt_before, MAX(created_at) AS last_fav_ts, date_diff('day', MAX(created_at), timestamp) AS days_since_last_fav FROM f GROUP BY 1,2"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "catboost",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.08,
+    "max_depth": 8,
+    "l2_leaf_reg": 3.0,
+    "categorical_features": [
+      "beer_static__brewer_id",
+      "beer_static__style_id",
+      "style_static__parent_style_id",
+      "style_static__style_category",
+      "brewer_static__brewer_country_id",
+      "brewer_static__brewer_state_id",
+      "brewer_static__brewer_type_id"
+    ]
+  }
+}

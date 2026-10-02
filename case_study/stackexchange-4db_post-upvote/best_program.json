@@ -1,0 +1,67 @@
+{
+  "feature_queries": [
+    {
+      "name": "post_content_basic",
+      "sql": "SELECT e.Id, e.CreationDate, p.PostTypeId AS post_type, p.OwnerUserId AS owner_user_id, p.ParentId AS parent_id, length(coalesce(p.Title,'')) AS title_len, length(coalesce(p.Body,'')) AS body_len, (length(coalesce(p.Body,'')) - length(replace(coalesce(p.Body,''),'<code>',''))) / 6.0 AS code_tag_count, (length(coalesce(p.Body,'')) - length(replace(coalesce(p.Body,''),'<a ',''))) / 3.0 AS link_tag_count, (length(coalesce(p.Body,'')) - length(replace(coalesce(p.Body,''),'?',''))) AS question_mark_count, (length(coalesce(p.Body,'')) - length(replace(coalesce(p.Body,''),'!',''))) AS exclam_count, (length(coalesce(p.Tags,'')) - length(replace(coalesce(p.Tags,''),'><',''))) + CASE WHEN p.Tags IS NULL OR p.Tags='' THEN 0 ELSE 1 END AS tag_count, CASE WHEN p.ParentId IS NULL THEN 0 ELSE 1 END AS is_answer, CASE WHEN p.Title IS NULL OR p.Title='' THEN 0 ELSE 1 END AS has_title FROM eval_table e LEFT JOIN Posts p ON p.Id = e.Id"
+    },
+    {
+      "name": "temporal",
+      "sql": "SELECT Id, CreationDate, extract(dow from CreationDate) AS dow, extract(hour from CreationDate) AS hour, extract(month from CreationDate) AS month FROM eval_table"
+    },
+    {
+      "name": "user_profile",
+      "sql": "WITH base AS (SELECT e.Id, e.CreationDate, p.OwnerUserId AS owner_user_id FROM eval_table e LEFT JOIN Posts p ON p.Id=e.Id) SELECT b.Id, b.CreationDate, CASE WHEN u.Id IS NULL THEN 0 ELSE 1 END AS has_user_row, datediff('day', u.CreationDate, b.CreationDate) AS owner_tenure_days, length(coalesce(u.AboutMe,'')) AS aboutme_len, CASE WHEN u.Location IS NULL OR u.Location='' THEN 0 ELSE 1 END AS has_location, CASE WHEN u.WebsiteUrl IS NULL OR u.WebsiteUrl='' THEN 0 ELSE 1 END AS has_website FROM base b LEFT JOIN Users u ON u.Id=b.owner_user_id AND u.CreationDate < b.CreationDate"
+    },
+    {
+      "name": "owner_history_windowed",
+      "sql": "WITH base AS (SELECT e.Id, e.CreationDate, p.OwnerUserId AS OwnerUserId FROM eval_table e LEFT JOIN Posts p ON p.Id=e.Id), joined AS (SELECT b.Id, b.CreationDate, pp.CreationDate AS prev_cd, pp.PostTypeId AS prev_type FROM base b LEFT JOIN Posts pp ON pp.OwnerUserId=b.OwnerUserId AND pp.CreationDate < b.CreationDate) SELECT Id, CreationDate, COUNT(prev_cd) AS owner_prev_posts, SUM(CASE WHEN prev_type=1 THEN 1 ELSE 0 END) AS owner_prev_questions, SUM(CASE WHEN prev_type=2 THEN 1 ELSE 0 END) AS owner_prev_answers, SUM(CASE WHEN prev_cd >= CreationDate - INTERVAL '7 days' THEN 1 ELSE 0 END) AS owner_posts_7d, SUM(CASE WHEN prev_cd >= CreationDate - INTERVAL '30 days' THEN 1 ELSE 0 END) AS owner_posts_30d FROM joined GROUP BY Id, CreationDate"
+    },
+    {
+      "name": "owner_votes_activity_v2",
+      "sql": "WITH base AS (SELECT e.Id, e.CreationDate, p.OwnerUserId AS OwnerUserId FROM eval_table e LEFT JOIN Posts p ON p.Id=e.Id) SELECT b.Id, b.CreationDate, COUNT(v.Id) AS owner_prev_votes_cast, COUNT(DISTINCT date_trunc('day', v.CreationDate)) AS owner_vote_active_days, SUM(CASE WHEN v.CreationDate >= b.CreationDate - INTERVAL '30 days' THEN 1 ELSE 0 END) AS owner_votes_cast_30d, COUNT(DISTINCT v.VoteTypeId) AS owner_distinct_vote_types FROM base b LEFT JOIN Vote v ON v.UserId=b.OwnerUserId AND v.CreationDate < b.CreationDate GROUP BY b.Id, b.CreationDate"
+    },
+    {
+      "name": "owner_received_votes_prior",
+      "sql": "WITH base AS (SELECT e.Id, e.CreationDate, p.OwnerUserId AS OwnerUserId FROM eval_table e LEFT JOIN Posts p ON p.Id=e.Id), prev_posts AS (SELECT b.Id, b.CreationDate, pp.Id AS prev_post_id FROM base b LEFT JOIN Posts pp ON pp.OwnerUserId=b.OwnerUserId AND pp.CreationDate < b.CreationDate) SELECT p.Id, p.CreationDate, COUNT(v.Id) AS owner_prev_votes_received, SUM(CASE WHEN v.VoteTypeId=2 THEN 1 ELSE 0 END) AS owner_prev_upvotes_received, SUM(CASE WHEN v.VoteTypeId=3 THEN 1 ELSE 0 END) AS owner_prev_downvotes_received, SUM(CASE WHEN v.CreationDate >= p.CreationDate - INTERVAL '30 days' THEN 1 ELSE 0 END) AS owner_votes_received_30d FROM prev_posts p LEFT JOIN Vote v ON v.PostId=p.prev_post_id AND v.CreationDate < p.CreationDate GROUP BY p.Id, p.CreationDate"
+    },
+    {
+      "name": "post_interactions_pre",
+      "sql": "SELECT e.Id, e.CreationDate, COUNT(v.Id) AS prior_votes_on_post, SUM(CASE WHEN v.VoteTypeId=2 THEN 1 ELSE 0 END) AS prior_upvotes_on_post, COUNT(c.Id) AS prior_comments_on_post, COALESCE(SUM(c.Score),0) AS prior_comment_score_sum FROM eval_table e LEFT JOIN Vote v ON v.PostId=e.Id AND v.CreationDate < e.CreationDate LEFT JOIN Comments c ON c.PostId=e.Id AND c.CreationDate < e.CreationDate GROUP BY e.Id, e.CreationDate"
+    },
+    {
+      "name": "tag_priors_fast",
+      "sql": "WITH base AS (SELECT e.Id, e.CreationDate, p.Id AS post_id FROM eval_table e LEFT JOIN Posts p ON p.Id=e.Id), cur_tags AS (SELECT b.Id, b.CreationDate, pt.TagId FROM base b LEFT JOIN PostTag pt ON pt.PostId=b.post_id), tag_hist AS (SELECT ct.Id, ct.CreationDate, ct.TagId, COUNT(*) AS tag_prev_posts, SUM(CASE WHEN tr.Target=1 THEN 1 ELSE 0 END) AS tag_prev_upvoted_posts FROM cur_tags ct LEFT JOIN PostTag hpt ON hpt.TagId=ct.TagId LEFT JOIN Posts hp ON hp.Id=hpt.PostId AND hp.CreationDate < ct.CreationDate LEFT JOIN train_table tr ON tr.Id=hp.Id GROUP BY ct.Id, ct.CreationDate, ct.TagId) SELECT Id, CreationDate, SUM(tag_prev_posts) AS tags_prev_posts_sum, AVG(tag_prev_posts) AS tags_prev_posts_avg, MAX(tag_prev_posts) AS tags_prev_posts_max, AVG( (tag_prev_upvoted_posts + 1.0) / (tag_prev_posts + 2.0) ) AS tags_smoothed_upvote_rate_avg, MAX( (tag_prev_upvoted_posts + 1.0) / (tag_prev_posts + 2.0) ) AS tags_smoothed_upvote_rate_max FROM tag_hist GROUP BY Id, CreationDate"
+    },
+    {
+      "name": "parent_tag_priors",
+      "sql": "WITH base AS (SELECT e.Id, e.CreationDate, p.ParentId AS parent_id FROM eval_table e LEFT JOIN Posts p ON p.Id=e.Id), parent_tags AS (SELECT b.Id, b.CreationDate, pt.TagId FROM base b LEFT JOIN PostTag pt ON pt.PostId=b.parent_id), tag_hist AS (SELECT ct.Id, ct.CreationDate, ct.TagId, COUNT(*) AS tag_prev_posts, SUM(CASE WHEN tr.Target=1 THEN 1 ELSE 0 END) AS tag_prev_upvoted_posts FROM parent_tags ct LEFT JOIN PostTag hpt ON hpt.TagId=ct.TagId LEFT JOIN Posts hp ON hp.Id=hpt.PostId AND hp.CreationDate < ct.CreationDate LEFT JOIN train_table tr ON tr.Id=hp.Id GROUP BY ct.Id, ct.CreationDate, ct.TagId) SELECT Id, CreationDate, SUM(tag_prev_posts) AS parent_tags_prev_posts_sum, AVG(tag_prev_posts) AS parent_tags_prev_posts_avg, MAX(tag_prev_posts) AS parent_tags_prev_posts_max, AVG( (tag_prev_upvoted_posts + 1.0) / (tag_prev_posts + 2.0) ) AS parent_tags_smoothed_upvote_rate_avg, MAX( (tag_prev_upvoted_posts + 1.0) / (tag_prev_posts + 2.0) ) AS parent_tags_smoothed_upvote_rate_max FROM tag_hist GROUP BY Id, CreationDate"
+    },
+    {
+      "name": "owner_rate_features",
+      "sql": "WITH base AS (SELECT e.Id, e.CreationDate, p.OwnerUserId AS owner_id FROM eval_table e LEFT JOIN Posts p ON p.Id=e.Id), prev_posts AS (SELECT b.Id, b.CreationDate, pp.Id AS prev_post_id FROM base b LEFT JOIN Posts pp ON pp.OwnerUserId=b.owner_id AND pp.CreationDate < b.CreationDate), received AS (SELECT p.Id, p.CreationDate, COUNT(v.Id) AS votes_received, SUM(CASE WHEN v.VoteTypeId=2 THEN 1 ELSE 0 END) AS up_received FROM prev_posts p LEFT JOIN Vote v ON v.PostId=p.prev_post_id AND v.CreationDate < p.CreationDate GROUP BY p.Id, p.CreationDate) SELECT Id, CreationDate, votes_received, up_received, (up_received+1.0)/(votes_received+2.0) AS owner_smoothed_upvote_rate_received FROM received"
+    },
+    {
+      "name": "tag_rarity_v2",
+      "sql": "WITH base AS (SELECT e.Id, e.CreationDate, p.Id AS post_id, p.ParentId AS parent_id FROM eval_table e LEFT JOIN Posts p ON p.Id=e.Id), cur_tags AS (SELECT b.Id, b.CreationDate, pt.TagId FROM base b LEFT JOIN PostTag pt ON pt.PostId=b.post_id), tag_counts AS (SELECT ct.Id, ct.CreationDate, ct.TagId, COALESCE(t.Count,0) AS global_tag_count FROM cur_tags ct LEFT JOIN Tag t ON t.Id=ct.TagId), agg AS (SELECT Id, CreationDate, MIN(global_tag_count) AS tag_global_count_min, AVG(global_tag_count) AS tag_global_count_avg, MAX(global_tag_count) AS tag_global_count_max, (MAX(global_tag_count)-MIN(global_tag_count)) AS tag_global_count_range FROM tag_counts GROUP BY Id, CreationDate) SELECT b.Id, b.CreationDate, COALESCE(a.tag_global_count_min,0) AS tag_global_count_min, COALESCE(a.tag_global_count_avg,0) AS tag_global_count_avg, COALESCE(a.tag_global_count_max,0) AS tag_global_count_max, COALESCE(a.tag_global_count_range,0) AS tag_global_count_range FROM (SELECT DISTINCT Id, CreationDate FROM base) b LEFT JOIN agg a ON a.Id=b.Id AND a.CreationDate=b.CreationDate"
+    },
+    {
+      "name": "parent_owner_priors",
+      "sql": "WITH base AS (SELECT e.Id, e.CreationDate, p.ParentId AS parent_id FROM eval_table e LEFT JOIN Posts p ON p.Id=e.Id), parent_post AS (SELECT b.Id, b.CreationDate, pp.OwnerUserId AS parent_owner_id FROM base b LEFT JOIN Posts pp ON pp.Id=b.parent_id), prev_parent_owner_posts AS (SELECT po.Id, po.CreationDate, ppp.Id AS prev_post_id FROM parent_post po LEFT JOIN Posts ppp ON ppp.OwnerUserId=po.parent_owner_id AND ppp.CreationDate < po.CreationDate), received AS (SELECT r.Id, r.CreationDate, COUNT(v.Id) AS parent_owner_votes_received, SUM(CASE WHEN v.VoteTypeId=2 THEN 1 ELSE 0 END) AS parent_owner_up_received FROM prev_parent_owner_posts r LEFT JOIN Vote v ON v.PostId=r.prev_post_id AND v.CreationDate < r.CreationDate GROUP BY r.Id, r.CreationDate) SELECT Id, CreationDate, parent_owner_votes_received, parent_owner_up_received, (parent_owner_up_received+1.0)/(parent_owner_votes_received+2.0) AS parent_owner_smoothed_upvote_rate_received FROM received"
+    },
+    {
+      "name": "parent_tag_rarity",
+      "sql": "WITH base AS (SELECT e.Id, e.CreationDate, p.ParentId AS parent_id FROM eval_table e LEFT JOIN Posts p ON p.Id=e.Id), parent_tags AS (SELECT b.Id, b.CreationDate, pt.TagId FROM base b LEFT JOIN PostTag pt ON pt.PostId=b.parent_id), tag_counts AS (SELECT pt.Id, pt.CreationDate, COALESCE(t.Count,0) AS global_tag_count FROM parent_tags pt LEFT JOIN Tag t ON t.Id=pt.TagId), agg AS (SELECT Id, CreationDate, MIN(global_tag_count) AS parent_tag_global_count_min, AVG(global_tag_count) AS parent_tag_global_count_avg, MAX(global_tag_count) AS parent_tag_global_count_max, (MAX(global_tag_count)-MIN(global_tag_count)) AS parent_tag_global_count_range FROM tag_counts GROUP BY Id, CreationDate) SELECT b.Id, b.CreationDate, COALESCE(a.parent_tag_global_count_min,0) AS parent_tag_global_count_min, COALESCE(a.parent_tag_global_count_avg,0) AS parent_tag_global_count_avg, COALESCE(a.parent_tag_global_count_max,0) AS parent_tag_global_count_max, COALESCE(a.parent_tag_global_count_range,0) AS parent_tag_global_count_range FROM (SELECT DISTINCT Id, CreationDate FROM base) b LEFT JOIN agg a ON a.Id=b.Id AND a.CreationDate=b.CreationDate"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "xgboost",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.05,
+    "max_depth": 7,
+    "subsample": 0.85,
+    "colsample_bytree": 0.75,
+    "min_child_weight": 10,
+    "reg_lambda": 1.0
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "feature_queries": [
+    {
+      "name": "user_profile_geo",
+      "sql": "SELECT e.user, e.timestamp, u.locale, u.gender, u.birthyear, u.timezone,\n       date_diff('day', u.joinedAt, e.timestamp) AS days_since_joined,\n       CASE WHEN u.location IS NULL THEN NULL ELSE regexp_extract(u.location, ',\\s*([A-Z]{2})$', 1) END AS user_state\nFROM eval_table e\nLEFT JOIN users u ON u.user_id = e.user"
+    },
+    {
+      "name": "attendance_core_plus",
+      "sql": "WITH base AS (SELECT user, timestamp FROM eval_table),\natt AS (\n  SELECT b.user, b.timestamp, a.event, a.status, a.start_time\n  FROM base b\n  LEFT JOIN event_attendees a\n    ON a.user_id=b.user\n   AND a.start_time < b.timestamp\n   AND a.start_time >= b.timestamp - INTERVAL '60 days'\n)\nSELECT\n  user, timestamp,\n  COUNT(*) FILTER (WHERE start_time >= timestamp - INTERVAL '7 days') AS attend_7d,\n  COUNT(*) FILTER (WHERE start_time >= timestamp - INTERVAL '14 days') AS attend_14d,\n  COUNT(*) FILTER (WHERE start_time >= timestamp - INTERVAL '30 days') AS attend_30d,\n  COUNT(*) AS attend_60d,\n  COUNT(DISTINCT event) FILTER (WHERE start_time >= timestamp - INTERVAL '30 days') AS distinct_events_30d,\n  COUNT(DISTINCT event) AS distinct_events_60d,\n  MIN(date_diff('day', start_time, timestamp)) AS days_since_last_attend,\n  SUM(CASE WHEN status='yes' THEN 1 ELSE 0 END) FILTER (WHERE start_time >= timestamp - INTERVAL '30 days') AS yes_30d,\n  SUM(CASE WHEN status='maybe' THEN 1 ELSE 0 END) FILTER (WHERE start_time >= timestamp - INTERVAL '30 days') AS maybe_30d\nFROM att\nGROUP BY user, timestamp"
+    },
+    {
+      "name": "attendance_ratios",
+      "sql": "WITH core AS (\n  SELECT\n    b.user, b.timestamp,\n    COUNT(*) FILTER (WHERE a.start_time < b.timestamp AND a.start_time >= b.timestamp - INTERVAL '7 days') AS attend_7d,\n    COUNT(*) FILTER (WHERE a.start_time < b.timestamp AND a.start_time >= b.timestamp - INTERVAL '14 days') AS attend_14d,\n    SUM(CASE WHEN a.status='yes' THEN 1 ELSE 0 END) FILTER (WHERE a.start_time < b.timestamp AND a.start_time >= b.timestamp - INTERVAL '14 days') AS yes_14d,\n    SUM(CASE WHEN a.status='maybe' THEN 1 ELSE 0 END) FILTER (WHERE a.start_time < b.timestamp AND a.start_time >= b.timestamp - INTERVAL '14 days') AS maybe_14d\n  FROM eval_table b\n  LEFT JOIN event_attendees a\n    ON a.user_id=b.user\n   AND a.start_time < b.timestamp\n   AND a.start_time >= b.timestamp - INTERVAL '14 days'\n  GROUP BY b.user, b.timestamp\n)\nSELECT\n  user, timestamp,\n  CASE WHEN attend_14d>0 THEN 1 ELSE 0 END AS has_attend_14d,\n  attend_7d * 1.0 / NULLIF(attend_14d,0) AS attend_7_over_14,\n  yes_14d * 1.0 / NULLIF(attend_14d,0) AS yes_rate_14d,\n  maybe_14d * 1.0 / NULLIF(attend_14d,0) AS maybe_rate_14d\nFROM core"
+    },
+    {
+      "name": "attendance_diversity",
+      "sql": "WITH base AS (SELECT user, timestamp FROM eval_table),\natt AS (\n  SELECT b.user, b.timestamp, a.event, a.start_time\n  FROM base b\n  LEFT JOIN event_attendees a\n    ON a.user_id=b.user\n   AND a.start_time < b.timestamp\n   AND a.start_time >= b.timestamp - INTERVAL '60 days'\n)\nSELECT\n  user, timestamp,\n  COUNT(*) FILTER (WHERE start_time >= timestamp - INTERVAL '30 days') AS attend_30d,\n  COUNT(DISTINCT event) FILTER (WHERE start_time >= timestamp - INTERVAL '30 days') AS distinct_events_30d,\n  CASE WHEN COUNT(*) FILTER (WHERE start_time >= timestamp - INTERVAL '30 days')>0\n       THEN COUNT(DISTINCT event) FILTER (WHERE start_time >= timestamp - INTERVAL '30 days')*1.0 / COUNT(*) FILTER (WHERE start_time >= timestamp - INTERVAL '30 days')\n       ELSE 0.0 END AS distinct_over_total_30d,\n  COUNT(*) AS attend_60d,\n  COUNT(DISTINCT event) AS distinct_events_60d,\n  CASE WHEN COUNT(*)>0 THEN COUNT(DISTINCT event)*1.0/COUNT(*) ELSE 0.0 END AS distinct_over_total_60d\nFROM att\nGROUP BY user, timestamp"
+    },
+    {
+      "name": "event_content_recent",
+      "sql": "WITH base AS (SELECT user, timestamp FROM eval_table),\nrecent AS (\n  SELECT b.user, b.timestamp, a.event, a.status\n  FROM base b\n  JOIN event_attendees a\n    ON a.user_id=b.user\n   AND a.start_time < b.timestamp\n   AND a.start_time >= b.timestamp - INTERVAL '60 days'\n   AND a.status IN ('yes','maybe')\n),\njoined AS (\n  SELECT r.user, r.timestamp, r.status, ev.country, ev.state,\n         COALESCE(ev.c_1,0) AS c1, COALESCE(ev.c_2,0) AS c2, COALESCE(ev.c_3,0) AS c3,\n         COALESCE(ev.c_4,0) AS c4, COALESCE(ev.c_5,0) AS c5, COALESCE(ev.c_6,0) AS c6\n  FROM recent r\n  JOIN events ev ON ev.event_id = r.event\n)\nSELECT\n  user, timestamp,\n  COUNT(*) AS attended_yesmaybe_60d,\n  COUNT(*) FILTER (WHERE status='yes') AS attended_yes_60d,\n  COUNT(*) FILTER (WHERE status='maybe') AS attended_maybe_60d,\n  COUNT(DISTINCT country) AS n_countries_60d,\n  COUNT(DISTINCT state) AS n_states_60d,\n  SUM(c1) AS sum_c1_60d,\n  SUM(c2) AS sum_c2_60d,\n  SUM(c3) AS sum_c3_60d,\n  SUM(c4) AS sum_c4_60d,\n  SUM(c5) AS sum_c5_60d,\n  SUM(c6) AS sum_c6_60d\nFROM joined\nGROUP BY user, timestamp"
+    },
+    {
+      "name": "geo_match",
+      "sql": "WITH base AS (SELECT user, timestamp FROM eval_table),\nuser_state AS (\n  SELECT e.user, e.timestamp,\n         CASE WHEN u.location IS NULL THEN NULL ELSE regexp_extract(u.location, ',\\s*([A-Z]{2})$', 1) END AS user_state\n  FROM eval_table e\n  LEFT JOIN users u ON u.user_id=e.user\n),\nrecent_states AS (\n  SELECT b.user, b.timestamp, ev.state\n  FROM base b\n  JOIN event_attendees a\n    ON a.user_id=b.user\n   AND a.start_time < b.timestamp\n   AND a.start_time >= b.timestamp - INTERVAL '60 days'\n   AND a.status IN ('yes','maybe')\n  JOIN events ev ON ev.event_id=a.event\n),\nagg AS (\n  SELECT user, timestamp, MODE(state) AS mode_event_state_60d\n  FROM recent_states\n  GROUP BY user, timestamp\n)\nSELECT\n  us.user, us.timestamp,\n  a.mode_event_state_60d,\n  CASE WHEN us.user_state IS NULL OR a.mode_event_state_60d IS NULL THEN NULL\n       WHEN us.user_state = a.mode_event_state_60d THEN 1 ELSE 0 END AS state_match_mode_60d\nFROM user_state us\nLEFT JOIN agg a ON a.user=us.user AND a.timestamp=us.timestamp"
+    },
+    {
+      "name": "friend_degree",
+      "sql": "WITH base AS (SELECT user, timestamp FROM eval_table),\nfr AS (SELECT user, COUNT(*) AS friend_count FROM user_friends GROUP BY user)\nSELECT b.user, b.timestamp, COALESCE(fr.friend_count,0) AS friend_count\nFROM base b LEFT JOIN fr ON fr.user=b.user"
+    }
+  ],
+  "combiner_code": "",
+  "model_choice": "xgboost",
+  "model_config": {
+    "n_estimators": 500,
+    "learning_rate": 0.05,
+    "max_depth": 5,
+    "min_child_weight": 50,
+    "subsample": 0.7,
+    "colsample_bytree": 0.8,
+    "reg_lambda": 2.0,
+    "reg_alpha": 0.5,
+    "categorical_features": [
+      "user_profile_geo__locale",
+      "user_profile_geo__gender",
+      "user_profile_geo__user_state",
+      "geo_match__mode_event_state_60d"
+    ]
+  }
+}

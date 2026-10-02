@@ -114,6 +114,10 @@ Each run saves artifacts to `artifact_dir/<dataset>_<task>_<timestamp>/`:
 | `eval_workspace.db` | DuckDB workspace with all trial predictions |
 | `summary.md` | Human-readable run summary |
 
+## Case studies
+
+The [case_study](case_study) directory contains one saved `best_program.json` for each of the 32 benchmark tasks. Each file includes the complete SQL feature queries and model configuration.
+
 ## Citation
 
 If you use RelAgent in your research, please cite:
@@ -126,4 +130,3 @@ If you use RelAgent in your research, please cite:
       booktitle={Advances in Neural Information Processing Systems},
 }
 ```
-
